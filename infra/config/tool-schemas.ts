@@ -34,7 +34,7 @@ const arr = (name: string, required = false): ToolParam => ({
 const bool = (name: string, required = false): ToolParam => ({ name, type: 'boolean', required });
 const idem = (): ToolParam => str('idempotencyKey');
 
-export const TOOL_CONTRACT_VERSION = '2026-09-20';
+export const TOOL_CONTRACT_VERSION = '2026-09-22';
 
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   { name: 'search_transactions', description: 'Search a customer\'s transactions with bounded deterministic filters.', params: [str('customerId'), str('merchantId', false), str('descriptorContains', false), str('since', false), str('until', false), num('minAmount', false), num('maxAmount', false), num('limit', false), str('caseId', false)] },

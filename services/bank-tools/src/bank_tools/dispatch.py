@@ -1,7 +1,7 @@
 """Gateway dispatcher for the bank-owned tools.
 
 `dispatch(store, tool_name, arguments)` takes a tool name and the camelCase argument object
-declared in infra/config/tool-schemas.ts (TOOL_CONTRACT_VERSION 2026-09-18), validates it, maps it
+declared in infra/config/tool-schemas.ts (TOOL_CONTRACT_VERSION 2026-09-22), validates it, maps it
 to the snake_case Python tool signature via the explicit tables below, and runs the tool.
 
 - Unknown tool -> UNKNOWN_TOOL. Tools owned by AgentCore/messaging -> NOT_OWNED (never faked).

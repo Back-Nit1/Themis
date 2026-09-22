@@ -28,21 +28,21 @@ test('wires an AgentCore Gateway backed by the tools adapter Lambda', () => {
   t.resourceCountIs('AWS::Lambda::Function', 1);
 });
 
-test('exposes all 20 tools from AGENT TOOL SURFACE (prompt.md #11) on the Gateway target', () => {
+test('exposes all 21 tools from AGENT TOOL SURFACE (prompt.md #11) plus submit_review_decision on the Gateway target', () => {
   const t = synth();
   const targets = t.findResources('AWS::BedrockAgentCore::GatewayTarget');
   const [target] = Object.values(targets);
   const tools = target.Properties.TargetConfiguration.Mcp.Lambda.ToolSchema.InlinePayload;
-  assert.equal(tools.length, 20);
+  assert.equal(tools.length, 21);
   const names = tools.map((tool) => tool.Name);
-  for (const expected of ['search_transactions', 'propose_provisional_credit', 'send_case_email', 'escalate_case']) {
+  for (const expected of ['search_transactions', 'propose_provisional_credit', 'send_case_email', 'escalate_case', 'submit_review_decision']) {
     assert.ok(names.includes(expected), `missing tool ${expected}`);
   }
 });
 
 test('freezes one versioned invocation contract with idempotency on every mutating tool', () => {
   assert.match(TOOL_CONTRACT_VERSION, /^\d{4}-\d{2}-\d{2}$/);
-  assert.equal(new Set(TOOL_DEFINITIONS.map((tool) => tool.name)).size, 20);
+  assert.equal(new Set(TOOL_DEFINITIONS.map((tool) => tool.name)).size, 21);
   for (const name of IDEMPOTENT_TOOL_NAMES) {
     const tool = TOOL_DEFINITIONS.find((candidate) => candidate.name === name);
     assert.ok(tool, `missing tool ${name}`);
