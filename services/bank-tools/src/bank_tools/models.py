@@ -450,12 +450,13 @@ class ReviewDecision:
     decision: ReviewDecisionType
     reason: str
     decidedAt: str
+    idempotencyKey: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "decisionId": self.decisionId, "reviewId": self.reviewId, "caseId": self.caseId,
             "actor": self.actor, "decision": str(self.decision), "reason": self.reason,
-            "decidedAt": self.decidedAt,
+            "decidedAt": self.decidedAt, "idempotencyKey": self.idempotencyKey,
         }
 
     @classmethod
@@ -463,6 +464,7 @@ class ReviewDecision:
         return cls(
             decisionId=d["decisionId"], reviewId=d["reviewId"], caseId=d["caseId"], actor=d["actor"],
             decision=ReviewDecisionType(d["decision"]), reason=d["reason"], decidedAt=d["decidedAt"],
+            idempotencyKey=d["idempotencyKey"],
         )
 
 

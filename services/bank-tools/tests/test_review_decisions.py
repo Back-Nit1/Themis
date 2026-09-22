@@ -45,6 +45,7 @@ def test_approve_moves_case_to_action_approved_and_resolves_review(store):
     assert result["case"]["requiresHumanReview"] is False
     assert result["review"]["status"] == "RESOLVED"
     assert result["decision"]["decision"] == "APPROVE"
+    assert result["decision"]["idempotencyKey"] == "k1"
     assert store.get_human_review_request("case_a", review.reviewId).status == "RESOLVED"
     assert len(store.review_decisions_for_case("case_a")) == 1
     audit_actions = [a.action for a in store.audit_for_case("case_a")]

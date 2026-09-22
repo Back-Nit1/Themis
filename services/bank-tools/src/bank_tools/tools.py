@@ -475,7 +475,7 @@ def submit_review_decision(
 
     record = ReviewDecision(
         decisionId=new_id("decision"), reviewId=review_id, caseId=case_id, actor=actor,
-        decision=decision_type, reason=reason, decidedAt=now,
+        decision=decision_type, reason=reason, decidedAt=now, idempotencyKey=key,
     )
     store.add_review_decision(record)
     store.record_audit(
