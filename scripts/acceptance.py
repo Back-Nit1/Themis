@@ -148,15 +148,15 @@ def _tail(output: str, lines: int = 30) -> str:
     return "\n".join(output.rstrip().splitlines()[-lines:])
 
 
-def check_clean(root: Path) -> Result:
+def check_clean(root: Path, check_id: str = "repository.clean", when: str = "before execution") -> Result:
     started = time.monotonic()
     proc = _run(["git", "status", "--porcelain=v1", "--untracked-files=all"], root)
     if proc.returncode:
-        return _result("repository.clean", "repository", "FAIL", "Could not inspect git status.", started, output=_tail(proc.stdout))
+        return _result(check_id, "repository", "FAIL", "Could not inspect git status.", started, output=_tail(proc.stdout))
     dirty = [line for line in proc.stdout.splitlines() if line]
     if dirty:
-        return _result("repository.clean", "repository", "FAIL", "Repository has tracked or untracked changes.", started, paths=dirty)
-    return _result("repository.clean", "repository", "PASS", "Repository is clean; the runner did not mutate git state.", started)
+        return _result(check_id, "repository", "FAIL", f"Repository has tracked or untracked changes {when}.", started, paths=dirty)
+    return _result(check_id, "repository", "PASS", f"Repository is clean {when}; the runner did not mutate git state.", started)
 
 
 def _tool_contract(source: str) -> tuple[str | None, list[str], list[str]]:
@@ -286,6 +286,54 @@ def check_assets(root: Path) -> Result:
     return _result("build.deployment-assets", "build", status, message, started, missing=missing, schemaMismatches=mismatched)
 
 
+# Import path each locked distribution installs, where it differs from the pip name.
+_LOCK_IMPORT_DIRS = {"python-dateutil": "dateutil", "six": "six.py"}
+
+
+def _lock_package_versions(source: str) -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for line in source.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "==" in line:
+            name, _, rest = line.partition("==")
+            versions[name.strip()] = rest.split()[0]
+    return versions
+
+
+def check_aws_package(root: Path) -> Result:
+    """Inspect the actual `package:aws` output (never deploys, no AWS calls):
+    every pinned runtime dependency is vendored at its locked version, and the
+    Runtime asset still carries its entry point, schemas, and service packages."""
+    started = time.monotonic()
+    runtime = root / "infra/build/agent-runtime"
+    lock = root / "scripts/requirements-aws.lock.txt"
+    if not lock.is_file():
+        return _result("build.aws-package", "build", "FAIL", "requirements-aws.lock.txt is missing.", started)
+    versions = _lock_package_versions(lock.read_text(encoding="utf-8"))
+    missing: list[str] = []
+    drift: list[str] = []
+    for dist_name, version in versions.items():
+        import_dir = runtime / _LOCK_IMPORT_DIRS.get(dist_name, dist_name)
+        if not import_dir.exists():
+            missing.append(f"{dist_name}: not vendored under infra/build/agent-runtime")
+            continue
+        dist_info = runtime / f"{dist_name.replace('-', '_')}-{version}.dist-info"
+        if not dist_info.is_dir():
+            drift.append(f"{dist_name}: locked at {version} but that version is not the one vendored")
+    for relative in (
+        "src/orchestrator/main.py", "src/bank_tools/__init__.py", "src/merchant_intel/__init__.py",
+        "src/orchestrator/__init__.py", "src/schemas.json", "customers.json", "merchant-profiles.json",
+    ):
+        if not (runtime / relative).is_file():
+            missing.append(f"infra/build/agent-runtime/{relative}")
+    status = "FAIL" if missing or drift else "PASS"
+    message = (
+        "boto3/botocore and every transitive dependency are vendored at their locked, hashed versions."
+        if status == "PASS" else "The vendored AWS package is missing dependencies or drifted from the lock file."
+    )
+    return _result("build.aws-package", "build", status, message, started, missing=missing, versionDrift=drift)
+
+
 def command_check(check_id: str, category: str, message: str, command: list[str], root: Path, timeout: int = 1200, env: dict[str, str] | None = None) -> Result:
     started = time.monotonic()
     print(f"[{check_id}] {' '.join(command)}", file=sys.stderr, flush=True)
@@ -343,6 +391,9 @@ def skipped_full_checks() -> list[Result]:
         ("python.wheels", "python", "Run with --mode full to build all Python wheels."),
         ("infra.cdk-synth", "infra", "Run with --mode full to synthesize CDK and stage deployment assets."),
         ("build.deployment-assets", "build", "Run with --mode full to validate freshly staged asset contents."),
+        ("infra.package-aws", "infra", "Run with --mode full to build the real vendored AWS package."),
+        ("build.aws-package", "build", "Run with --mode full to inspect the real vendored AWS package."),
+        ("repository.clean-after", "repository", "Run with --mode full to verify the runner left the tree clean."),
     )
     return [Result(check_id, category, "SKIP", message) for check_id, category, message in checks]
 
@@ -386,6 +437,9 @@ def run_acceptance(root: Path, mode: str) -> dict[str, object]:
         checks.extend(check_python_wheels(root))
         checks.append(command_check("infra.cdk-synth", "infra", "CDK synthesis completes locally.", ["npm", "run", "synth", "--workspace=infra"], root))
         checks.append(check_assets(root))
+        checks.append(command_check("infra.package-aws", "infra", "The real deployable AWS package built (boto3/botocore vendored, no deploy, no paid AWS calls).", ["npm", "run", "package:aws", "--workspace=infra"], root))
+        checks.append(check_aws_package(root))
+        checks.append(check_clean(root, "repository.clean-after", "after execution"))
     else:
         checks.extend(skipped_full_checks())
     checks.extend(manual_checks())
@@ -408,6 +462,9 @@ def render_text(report: dict[str, object]) -> str:
         placeholder = check["details"].get("placeholderOnly")
         if placeholder:
             lines.append(f"        placeholder-only: {', '.join(placeholder)}")
+        drift = check["details"].get("versionDrift")
+        if drift:
+            lines.append(f"        version drift: {', '.join(drift)}")
     counts = report["summary"]
     lines.extend(("", f"PASS={counts['PASS']} FAIL={counts['FAIL']} SKIP={counts['SKIP']} MANUAL={counts['MANUAL']}"))
     return "\n".join(lines)
