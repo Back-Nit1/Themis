@@ -18,11 +18,12 @@ from __future__ import annotations
 import functools
 from typing import Any, Callable
 
-from .errors import InvalidTransitionError, ToolError
+from .errors import InvalidTransitionError, ReviewAlreadyDecidedError, ToolError
 from .models import (
-    ActionType, Case, CaseOutcome, CaseStatus, ClaimType, Evidence, EvidenceCategory,
-    HumanReviewRequest, PolicyDecision, PolicyOutcome, Reliability, ValidationError,
-    can_transition_case_status, now_iso, require_currency, require_money,
+    REVIEW_DECISION_TARGET_STATUS, ActionType, Case, CaseOutcome, CaseStatus, ClaimType, Evidence,
+    EvidenceCategory, HumanReviewRequest, PolicyDecision, PolicyOutcome, Reliability, ReviewDecision,
+    ReviewDecisionType, ReviewStatus, ValidationError, can_transition_case_status, now_iso,
+    require_currency, require_id, require_money,
 )
 from .policy import evaluate_policy
 from .store import BankToolsStorage as BankToolsStore, new_id
@@ -402,6 +403,89 @@ def propose_card_replacement(store: BankToolsStore, *, case_id: str, idempotency
         store, tool="propose_card_replacement", action=ActionType.REPLACE_CARD, case=case,
         idempotency_key=idempotency_key, policy_extra={},
     )
+
+
+# -- investigator review decisions -------------------------------------------------
+#
+# submit_review_decision writes the case and the review request as two separate items (no
+# cross-item transactions in this store -- see store.py/dynamo_store.py module docs). A crash
+# between the two leaves the case moved but the review still PENDING; a retry with the same
+# idempotencyKey then sees a case that is no longer NEEDS_HUMAN_REVIEW and reports
+# INVALID_TRANSITION rather than completing. Same accepted limitation as the rest of this store;
+# a fix needs a version attribute / TransactWriteItems (bank-tools NEXT TASKS).
+
+@_guarded
+def submit_review_decision(
+    store: BankToolsStore, *, case_id: str, review_id: str, actor: str, decision: str, reason: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    key = _require_idempotency_key(idempotency_key, "submit_review_decision")
+    cached = store.idempotent_result("submit_review_decision", key)
+    if cached is not None:
+        return cached
+
+    def _fail(exc: ToolError, *, audit_actor: str) -> ToolError:
+        # Every attempt -- not just the ones that succeed -- lands in the audit trail.
+        store.record_audit(
+            case_id=case_id, action=f"REVIEW_DECISION_REJECTED:{exc.code}", tool="submit_review_decision",
+            result="FAILURE", actor=audit_actor,
+        )
+        return exc
+
+    try:
+        actor = require_id(actor, "actor")
+        reason = require_id(reason, "reason")
+        decision_type = ReviewDecisionType(decision)
+    except ValueError as exc:
+        raise _fail(ToolError(str(exc), "VALIDATION_ERROR"), audit_actor=actor if isinstance(actor, str) and actor else "UNKNOWN") from exc
+
+    try:
+        case = store.get_case(case_id)
+        review = store.get_human_review_request(case_id, review_id)
+    except ToolError as exc:
+        raise _fail(exc, audit_actor=actor) from exc
+
+    if review.status is not ReviewStatus.PENDING:
+        raise _fail(ReviewAlreadyDecidedError(f"review {review_id} was already decided"), audit_actor=actor)
+    if case.status is not CaseStatus.NEEDS_HUMAN_REVIEW:
+        raise _fail(
+            InvalidTransitionError(f"case {case_id} is not awaiting human review (status={case.status})"),
+            audit_actor=actor,
+        )
+    next_status = REVIEW_DECISION_TARGET_STATUS[decision_type]
+    if not can_transition_case_status(case.status, next_status):
+        raise _fail(InvalidTransitionError(f"invalid case transition: {case.status} -> {next_status}"), audit_actor=actor)
+
+    now = now_iso()
+    updated_case = Case(
+        caseId=case.caseId, customerId=case.customerId, status=next_status, createdAt=case.createdAt,
+        updatedAt=now, claimType=case.claimType, merchantId=case.merchantId, transactionIds=case.transactionIds,
+        evidenceIds=case.evidenceIds, totalDisputedAmount=case.totalDisputedAmount, currency=case.currency,
+        confidence=case.confidence, recommendedActions=case.recommendedActions, requiresHumanReview=False,
+        outcome=case.outcome,
+    )
+    store.replace_case(updated_case)
+
+    resolved_review = HumanReviewRequest(
+        reviewId=review.reviewId, caseId=review.caseId, reason=review.reason, summary=review.summary,
+        recommendedNextStep=review.recommendedNextStep, evidenceRefs=review.evidenceRefs,
+        status=ReviewStatus.RESOLVED,
+    )
+    store.replace_human_review_request(resolved_review)
+
+    record = ReviewDecision(
+        decisionId=new_id("decision"), reviewId=review_id, caseId=case_id, actor=actor,
+        decision=decision_type, reason=reason, decidedAt=now,
+    )
+    store.add_review_decision(record)
+    store.record_audit(
+        case_id=case_id, action=f"REVIEW_DECISION:{decision_type}", tool="submit_review_decision",
+        result="SUCCESS", actor=actor, human_approval_required=False,
+    )
+
+    result = _ok(case=updated_case.to_dict(), review=resolved_review.to_dict(), decision=record.to_dict())
+    store.remember_result("submit_review_decision", key, result)
+    return result
 
 
 # -- audit persistence ------------------------------------------------------------

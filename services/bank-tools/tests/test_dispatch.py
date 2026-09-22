@@ -59,6 +59,31 @@ def test_camel_case_mutating_tools(any_store):
     assert any_store.get_case(created["caseId"]).evidenceIds == [ev["evidenceId"]]
 
 
+def test_camel_case_submit_review_decision(any_store):
+    case_id = ok(dispatch(any_store, "create_case", {
+        "customerId": "customer_001", "claimType": "DUPLICATE_TRANSACTION", "transactionIds": [],
+        "idempotencyKey": "k-create-review",
+    }))["case"]["caseId"]
+    ok(dispatch(any_store, "propose_provisional_credit", {
+        "caseId": case_id, "amount": 999.0, "confidence": 0.9, "claimType": "DUPLICATE_TRANSACTION",
+        "idempotencyKey": "k-propose-review",
+    }))
+    review_id = any_store.human_review_requests_for_case(case_id)[0].reviewId
+    ok(dispatch(any_store, "update_case", {
+        "caseId": case_id, "status": "INTAKE", "idempotencyKey": "k-intake-review",
+    }))
+    ok(dispatch(any_store, "update_case", {
+        "caseId": case_id, "status": "NEEDS_HUMAN_REVIEW", "requiresHumanReview": True,
+        "idempotencyKey": "k-escalate-review",
+    }))
+    decided = ok(dispatch(any_store, "submit_review_decision", {
+        "caseId": case_id, "reviewId": review_id, "actor": "investigator_jane",
+        "decision": "APPROVE", "reason": "Sufficient evidence.", "idempotencyKey": "k-decide-review",
+    }))
+    assert decided["case"]["status"] == "ACTION_APPROVED"
+    assert decided["review"]["status"] == "RESOLVED"
+
+
 # -- validation -----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("tool,args,fragment", [

@@ -26,7 +26,7 @@ from typing import Any, Protocol
 from .errors import ConflictError, LeaseLostError, NotFoundError
 from .models import (
     ActionType, AuditRecord, AuditResult, Case, Evidence, HumanReviewRequest, Merchant,
-    MerchantProfile, PolicyDecision, PolicyOutcome, Transaction, now_iso,
+    MerchantProfile, PolicyDecision, PolicyOutcome, ReviewDecision, Transaction, now_iso,
 )
 
 _ALIAS_NORMALIZE_RE = re.compile(r"[^A-Z0-9]")
@@ -99,10 +99,14 @@ class BankToolsStorage(Protocol):
     def add_evidence(self, evidence: Evidence) -> None: ...
     def add_policy_decision(self, decision: PolicyDecision) -> None: ...
     def add_human_review_request(self, request: HumanReviewRequest) -> None: ...
+    def replace_human_review_request(self, request: HumanReviewRequest) -> None: ...
+    def get_human_review_request(self, case_id: str, review_id: str) -> HumanReviewRequest: ...
     def human_review_requests_for_case(self, case_id: str) -> list[HumanReviewRequest]: ...
+    def add_review_decision(self, decision: ReviewDecision) -> None: ...
+    def review_decisions_for_case(self, case_id: str) -> list[ReviewDecision]: ...
     def record_audit(
         self, *, case_id: str, action: str, tool: str, result: AuditResult | str = AuditResult.SUCCESS,
-        policy_name: str | None = None, policy_outcome: PolicyOutcome | None = None,
+        actor: str = "THEMIS_AGENT", policy_name: str | None = None, policy_outcome: PolicyOutcome | None = None,
         proposed_action: ActionType | None = None, input_amount: float | None = None,
         human_approval_required: bool | None = None,
     ) -> AuditRecord: ...
@@ -111,14 +115,14 @@ class BankToolsStorage(Protocol):
 
 def build_audit_record(
     *, case_id: str, action: str, tool: str, result: AuditResult | str = AuditResult.SUCCESS,
-    policy_name: str | None = None, policy_outcome: PolicyOutcome | None = None,
+    actor: str = "THEMIS_AGENT", policy_name: str | None = None, policy_outcome: PolicyOutcome | None = None,
     proposed_action: ActionType | None = None, input_amount: float | None = None,
     human_approval_required: bool | None = None,
 ) -> AuditRecord:
     """caseId is required by packages/contracts AuditEventSchema; only call this with a real case."""
     return AuditRecord(
         eventId=new_id("audit"), caseId=case_id, timestamp=now_iso(), action=action, tool=tool,
-        result=AuditResult(result), policyName=policy_name, policyOutcome=policy_outcome,
+        result=AuditResult(result), actor=actor, policyName=policy_name, policyOutcome=policy_outcome,
         proposedAction=proposed_action, inputAmount=input_amount,
         humanApprovalRequired=human_approval_required,
     )
@@ -139,6 +143,7 @@ class BankToolsStore:
         self._evidence: dict[str, Evidence] = {}
         self._policy_decisions: dict[str, list[PolicyDecision]] = {}
         self._human_review_requests: dict[str, list[HumanReviewRequest]] = {}
+        self._review_decisions: dict[str, list[ReviewDecision]] = {}
         self._audit_by_case: dict[str, list[AuditRecord]] = {}
         self._idempotency: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -294,18 +299,38 @@ class BankToolsStore:
     def add_human_review_request(self, request: HumanReviewRequest) -> None:
         self._human_review_requests.setdefault(request.caseId, []).append(request)
 
+    def replace_human_review_request(self, request: HumanReviewRequest) -> None:
+        bucket = self._human_review_requests.get(request.caseId, [])
+        for i, existing in enumerate(bucket):
+            if existing.reviewId == request.reviewId:
+                bucket[i] = request
+                return
+        raise NotFoundError(f"human review request not found: {request.reviewId}")
+
+    def get_human_review_request(self, case_id: str, review_id: str) -> HumanReviewRequest:
+        for request in self._human_review_requests.get(case_id, []):
+            if request.reviewId == review_id:
+                return request
+        raise NotFoundError(f"human review request not found: {review_id}")
+
     def human_review_requests_for_case(self, case_id: str) -> list[HumanReviewRequest]:
         return list(self._human_review_requests.get(case_id, []))
+
+    def add_review_decision(self, decision: ReviewDecision) -> None:
+        self._review_decisions.setdefault(decision.caseId, []).append(decision)
+
+    def review_decisions_for_case(self, case_id: str) -> list[ReviewDecision]:
+        return list(self._review_decisions.get(case_id, []))
 
     # -- audit ------------------------------------------------------------------
     def record_audit(
         self, *, case_id: str, action: str, tool: str, result: AuditResult | str = AuditResult.SUCCESS,
-        policy_name: str | None = None, policy_outcome: PolicyOutcome | None = None,
+        actor: str = "THEMIS_AGENT", policy_name: str | None = None, policy_outcome: PolicyOutcome | None = None,
         proposed_action: ActionType | None = None, input_amount: float | None = None,
         human_approval_required: bool | None = None,
     ) -> AuditRecord:
         record = build_audit_record(
-            case_id=case_id, action=action, tool=tool, result=result, policy_name=policy_name,
+            case_id=case_id, action=action, tool=tool, result=result, actor=actor, policy_name=policy_name,
             policy_outcome=policy_outcome, proposed_action=proposed_action, input_amount=input_amount,
             human_approval_required=human_approval_required,
         )

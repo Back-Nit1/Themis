@@ -10,6 +10,7 @@ packages/contracts/src/index.ts (CASE_STATUS_TRANSITIONS / AuditEventSchema).
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -113,6 +114,27 @@ class PolicyOutcome(StrEnum):
     ALLOW = "ALLOW"
     DENY = "DENY"
     REQUIRE_HUMAN_REVIEW = "REQUIRE_HUMAN_REVIEW"
+
+
+class ReviewStatus(StrEnum):
+    PENDING = "PENDING"
+    RESOLVED = "RESOLVED"
+
+
+class ReviewDecisionType(StrEnum):
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+    REQUEST_MORE_EVIDENCE = "REQUEST_MORE_EVIDENCE"
+
+
+# Ported from packages/contracts/src/index.ts REVIEW_DECISION_TARGET_STATUS. REJECT and
+# REQUEST_MORE_EVIDENCE both use the only "send it back" edge NEEDS_HUMAN_REVIEW has
+# (INVESTIGATING); the decision record, not the case status, distinguishes why.
+REVIEW_DECISION_TARGET_STATUS: dict[ReviewDecisionType, "CaseStatus"] = {
+    ReviewDecisionType.APPROVE: CaseStatus.ACTION_APPROVED,
+    ReviewDecisionType.REJECT: CaseStatus.INVESTIGATING,
+    ReviewDecisionType.REQUEST_MORE_EVIDENCE: CaseStatus.INVESTIGATING,
+}
 
 
 class AuditResult(StrEnum):
@@ -383,6 +405,10 @@ class PolicyDecision:
         )
 
 
+def _new_review_id() -> str:
+    return f"review_{uuid.uuid4().hex[:12]}"
+
+
 @dataclass(slots=True)
 class HumanReviewRequest:
     caseId: str
@@ -390,18 +416,53 @@ class HumanReviewRequest:
     summary: str
     recommendedNextStep: str
     evidenceRefs: list[str] = field(default_factory=list)
+    reviewId: str = field(default_factory=_new_review_id)
+    status: ReviewStatus = ReviewStatus.PENDING
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "caseId": self.caseId, "reason": self.reason, "summary": self.summary,
+            "reviewId": self.reviewId, "caseId": self.caseId, "reason": self.reason, "summary": self.summary,
             "recommendedNextStep": self.recommendedNextStep, "evidenceRefs": list(self.evidenceRefs),
+            "status": str(self.status),
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "HumanReviewRequest":
         return cls(
-            caseId=d["caseId"], reason=d["reason"], summary=d["summary"],
+            reviewId=d["reviewId"], caseId=d["caseId"], reason=d["reason"], summary=d["summary"],
             recommendedNextStep=d["recommendedNextStep"], evidenceRefs=list(d["evidenceRefs"]),
+            status=ReviewStatus(d["status"]),
+        )
+
+
+@dataclass(slots=True)
+class ReviewDecision:
+    """An investigator's decision on a HumanReviewRequest (prompt.md review workflow).
+
+    Mirrors packages/contracts/src/index.ts ReviewDecisionSchema. `actor` is trusted as an
+    already-authenticated audit label; this package has no notion of who may decide what -- see
+    packages/contracts README "Review decision workflow" for the authorization boundary.
+    """
+    decisionId: str
+    reviewId: str
+    caseId: str
+    actor: str
+    decision: ReviewDecisionType
+    reason: str
+    decidedAt: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "decisionId": self.decisionId, "reviewId": self.reviewId, "caseId": self.caseId,
+            "actor": self.actor, "decision": str(self.decision), "reason": self.reason,
+            "decidedAt": self.decidedAt,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ReviewDecision":
+        return cls(
+            decisionId=d["decisionId"], reviewId=d["reviewId"], caseId=d["caseId"], actor=d["actor"],
+            decision=ReviewDecisionType(d["decision"]), reason=d["reason"], decidedAt=d["decidedAt"],
         )
 
 

@@ -10,7 +10,8 @@ so those share the existing tables via key prefixes -- see .handoffs/bank-tools/
 - Merchants: pk merchantId; "M#id" merchant, "P#id" profile, "A#<normalized alias>" alias->id,
   "C#id" customer. Each row is {merchantId, doc} (alias rows: {merchantId, target}).
 - Audit: pk caseId, sk eventId; "audit_*" audit events, "policy_*" decisions, "review_*"
-  human-review requests. Each row is {caseId, eventId, doc}.
+  human-review requests (keyed by reviewId, mutable: PENDING -> RESOLVED), "decision_*"
+  investigator review decisions (immutable, one per accepted decision). Each row is {caseId, eventId, doc}.
 - Idempotency: pk idempotencyKey = "<tool>#<key>", TTL attribute expiresAt, leaseOwner = per-claim uuid token
   (every complete/release is conditional on it; rows without leaseOwner are legacy).
 
@@ -30,7 +31,7 @@ from typing import Any, Mapping
 from .errors import ConflictError, LeaseLostError, NotFoundError
 from .models import (
     ActionType, AuditRecord, AuditResult, Case, Evidence, HumanReviewRequest, Merchant,
-    MerchantProfile, PolicyDecision, PolicyOutcome, Transaction, now_iso,
+    MerchantProfile, PolicyDecision, PolicyOutcome, ReviewDecision, Transaction, now_iso,
 )
 from .store import (
     CLAIM_LEASE_SECONDS, CLAIMED, IN_PROGRESS, MISMATCH, REPLAY, IdempotencyClaim, _parse_ts,
@@ -329,19 +330,46 @@ class DynamoBankToolsStore:
         return [PolicyDecision.from_dict(d) for d in docs]
 
     def add_human_review_request(self, request: HumanReviewRequest) -> None:
-        self._put_audit_row(request.caseId, "review", request.to_dict())
+        # Keyed by reviewId (not a fresh id per call) so it can later be looked up and replaced --
+        # unlike audit/policy rows, a HumanReviewRequest is a stateful entity (PENDING -> RESOLVED),
+        # same as Case, not an immutable log line.
+        self._put_audit_row(request.caseId, "review", request.to_dict(), sk=request.reviewId)
+
+    def replace_human_review_request(self, request: HumanReviewRequest) -> None:
+        try:
+            self._put(
+                self._t.audit, {"caseId": request.caseId, "eventId": request.reviewId, "doc": request.to_dict()},
+                condition="attribute_exists(eventId)",
+            )
+        except Exception as exc:
+            if _conditional_failed(exc):
+                raise NotFoundError(f"human review request not found: {request.reviewId}") from exc
+            raise
+
+    def get_human_review_request(self, case_id: str, review_id: str) -> HumanReviewRequest:
+        doc = self._doc(self._t.audit, caseId=case_id, eventId=review_id)
+        if doc is None:
+            raise NotFoundError(f"human review request not found: {review_id}")
+        return HumanReviewRequest.from_dict(doc)
 
     def human_review_requests_for_case(self, case_id: str) -> list[HumanReviewRequest]:
         return [HumanReviewRequest.from_dict(d) for d in self._audit_rows(case_id, "review_")]
 
+    def add_review_decision(self, decision: ReviewDecision) -> None:
+        self._put_audit_row(decision.caseId, "decision", decision.to_dict(), sk=decision.decisionId)
+
+    def review_decisions_for_case(self, case_id: str) -> list[ReviewDecision]:
+        docs = sorted(self._audit_rows(case_id, "decision_"), key=lambda d: d["decidedAt"])
+        return [ReviewDecision.from_dict(d) for d in docs]
+
     def record_audit(
         self, *, case_id: str, action: str, tool: str, result: AuditResult | str = AuditResult.SUCCESS,
-        policy_name: str | None = None, policy_outcome: PolicyOutcome | None = None,
+        actor: str = "THEMIS_AGENT", policy_name: str | None = None, policy_outcome: PolicyOutcome | None = None,
         proposed_action: ActionType | None = None, input_amount: float | None = None,
         human_approval_required: bool | None = None,
     ) -> AuditRecord:
         record = build_audit_record(
-            case_id=case_id, action=action, tool=tool, result=result, policy_name=policy_name,
+            case_id=case_id, action=action, tool=tool, result=result, actor=actor, policy_name=policy_name,
             policy_outcome=policy_outcome, proposed_action=proposed_action, input_amount=input_amount,
             human_approval_required=human_approval_required,
         )

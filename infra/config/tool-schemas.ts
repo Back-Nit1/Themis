@@ -54,6 +54,7 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   { name: 'propose_card_replacement', description: 'Propose replacing the customer\'s card. Always requires human review.', params: [str('caseId'), idem()] },
   { name: 'propose_dispute_creation', description: 'Propose formally disputing confirmed transactions. Policy-gated.', params: [str('caseId'), arr('transactionIds', true), bool('hasConfirmedTransactions', true), idem()] },
   { name: 'propose_provisional_credit', description: 'Propose issuing a provisional credit. Policy-gated on amount, confidence, and classification.', params: [str('caseId'), num('amount', true, 0), num('confidence', true, 0, 1), str('claimType'), idem()] },
+  { name: 'submit_review_decision', description: 'Record an investigator decision (approve/reject/request more evidence) on a pending human review.', params: [str('caseId'), str('reviewId'), str('actor'), str('decision'), str('reason'), idem()] },
   { name: 'escalate_case', description: 'Escalate a case to human review.', params: [str('caseId'), str('reason'), str('summary', false), arr('evidenceRefs'), idem()] },
   { name: 'send_customer_message', description: 'Send an RCS/SMS message to the customer.', params: [str('caseId'), str('channel'), str('text'), idem()] },
   { name: 'send_case_email', description: 'Send a transactional case-summary email via SES.', params: [str('caseId'), str('subject', false), idem()] },
@@ -62,5 +63,5 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
 export const IDEMPOTENT_TOOL_NAMES = Object.freeze([
   'create_case', 'update_case', 'save_evidence', 'generate_case_report',
   'propose_payment_block', 'propose_card_replacement', 'propose_dispute_creation',
-  'propose_provisional_credit', 'escalate_case', 'send_customer_message', 'send_case_email',
+  'propose_provisional_credit', 'submit_review_decision', 'escalate_case', 'send_customer_message', 'send_case_email',
 ] as const);

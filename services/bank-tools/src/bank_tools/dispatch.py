@@ -137,6 +137,9 @@ SPECS: dict[str, Spec] = {
     "propose_provisional_credit": Spec(tools.propose_provisional_credit, (
         _s("caseId", "case_id"), _n("amount", "amount", True, 0), _n("confidence", "confidence", True, 0, 1),
         _s("claimType", "claim_type"), _IDEM), _adapt_credit),
+    "submit_review_decision": Spec(tools.submit_review_decision, (
+        _s("caseId", "case_id"), _s("reviewId", "review_id"), _s("actor", "actor"),
+        _s("decision", "decision"), _s("reason", "reason"), _IDEM)),
 }
 
 def _error(code: str, message: str, **extra: Any) -> dict[str, Any]:
