@@ -68,29 +68,28 @@ the SES sender. Bootstrap is a one-time account/region operation.
 ```sh
 npm exec --workspace=infra -- cdk bootstrap "aws://${CDK_DEFAULT_ACCOUNT}/${CDK_DEFAULT_REGION}"
 
-# 1. Compile, build assets, and synthesize all stacks with the intended config.
-npm run synth --workspace=infra
-
-# 2. Rebuild complete AWS assets. This vendors boto3/botocore into the Runtime
-#    and asserts both Python assets contain all three packages and schema data.
-npm run package:aws --workspace=infra
-
-# 3. Validate deployment-only values, then deploy the already-packaged assets.
-npm run preflight --workspace=infra
-npm exec --workspace=infra -- cdk deploy --all
+# Synthesizes credential-free, vendors boto3/botocore from the pinned+hashed
+# scripts/requirements-aws.lock.txt, validates deployment-only env values,
+# then deploys the already-packaged assets. One command, in the safe order.
+npm run deploy:aws --workspace=infra
 ```
 
-`package:aws` produces:
+`deploy:aws` composes `synth` (compile, build assets, synthesize all stacks),
+`package:aws`, `preflight`, then `cdk deploy --all`. `package:aws` produces:
 
 - `infra/build/tools-adapter`: `handler.py`, `router.py`, `bank_tools`, the canonical
   `merchant_intel` package (including `DynamoProfileStore`), `orchestrator`, merchant profiles, schemas.
 - `infra/build/agent-runtime`: the same three packages under `src/`, packaged
-  schemas and fixtures, Runtime entry point, and vendored `boto3`/`botocore`.
+  schemas and fixtures, Runtime entry point, and vendored `boto3`/`botocore`/transitive
+  deps at the exact hashed versions pinned in `scripts/requirements-aws.lock.txt`.
 - `services/messaging/dist/index.mjs`: the bundled Node 22 messaging Lambda.
 
-Do not run `npm run build --workspace=infra` between `package:aws` and deploy;
-the ordinary build intentionally creates the credential-free, non-vendored
-Runtime asset used by tests.
+Running `npm run build --workspace=infra` on its own (e.g. from `npm test`)
+never strips a `package:aws` vendor done earlier: it only refreshes `src/` and
+the fixtures, leaving any already-vendored `infra/build/agent-runtime`
+dependencies untouched. `npm run acceptance:json` builds and inspects this
+same real vendored package (no deploy, no paid AWS calls) as part of its full
+release gate.
 
 ## Seed after deploy
 

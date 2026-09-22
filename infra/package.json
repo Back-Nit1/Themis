@@ -7,7 +7,8 @@
     "synth": "npm run build && cdk synth",
     "test": "npm run build && node --test test/*.test.mjs",
     "package:aws": "npm run build && python3 ../scripts/build_assets.py --with-boto3",
-    "preflight": "node dist/bin/preflight.js"
+    "preflight": "node dist/bin/preflight.js",
+    "deploy:aws": "npm run synth && npm run package:aws && npm run preflight && cdk deploy --all"
   },
   "dependencies": {
     "aws-cdk-lib": "2.270.0",
