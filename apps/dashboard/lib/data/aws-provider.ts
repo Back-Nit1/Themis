@@ -3,7 +3,9 @@ import {
 } from '@themis/contracts';
 import { defaultAwsAccess, type DynamoAccess, type ObjectAccess } from './aws-access';
 import type { AwsConfig } from './aws-config';
-import { DataSourceError, type DataProvider, type DataStatus } from './provider';
+import {
+  DataSourceError, type DataProvider, type DataStatus, type ReviewDecisionInput, type ReviewDecisionResult,
+} from './provider';
 
 // Row layout is owned by bank-tools (services/bank-tools/src/bank_tools/dynamo_store.py):
 // cases: flat Case row keyed caseId ("E#..." rows are evidence); merchants: "P#<id>" {doc} profile rows;
@@ -77,6 +79,23 @@ export function createAwsProvider(
         config.auditTable, 'caseId = :c AND begins_with(eventId, :audit)', { ':c': caseId, ':audit': 'audit_' })));
       return events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     }),
+    // Blocked, not hand-rolled: writing a review decision means claiming an idempotency lease,
+    // updating the case row, resolving the review row and appending a decision row, all against
+    // the same conditional-write protocol services/bank-tools/dynamo_store.py owns. Reimplementing
+    // that here in TypeScript would be a second, easy-to-drift copy of the state machine. The real
+    // path is the Gateway -> bank_tools.dispatch("submit_review_decision", ...) once the Lambda
+    // handler exists (services/bank-tools KNOWN ISSUES: "no Lambda handler module yet"). Until
+    // then this reports the blocker instead of mutating AWS state through an unreviewed path.
+    submitReviewDecision(_input: ReviewDecisionInput): Promise<ReviewDecisionResult> {
+      return Promise.resolve({
+        status: 'error',
+        error: {
+          code: 'NOT_IMPLEMENTED',
+          message: 'AWS-backed review decisions require the Gateway/Lambda wiring for submit_review_decision, '
+            + 'which is not deployed yet. Use THEMIS_DASHBOARD_DATA_SOURCE=fixtures, or decide through bank-tools directly.',
+        },
+      });
+    },
     status(): DataStatus {
       const staleSince = [...stale.values()].sort()[0];
       return { source: 'aws', stale: stale.size > 0, ...(staleSince ? { staleSince } : {}),

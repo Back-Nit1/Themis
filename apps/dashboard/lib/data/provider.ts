@@ -1,4 +1,6 @@
-import type { AuditEvent, Case, CaseReport, HumanReviewRequest, MerchantProfile } from '@themis/contracts';
+import type {
+  AuditEvent, Case, CaseReport, HumanReviewRequest, MerchantProfile, ReviewDecision, ReviewDecisionType,
+} from '@themis/contracts';
 
 export type DataSource = 'fixtures' | 'aws';
 
@@ -20,6 +22,19 @@ export class DataSourceError extends Error {
   }
 }
 
+export interface ReviewDecisionInput {
+  reviewId: string;
+  caseId: string;
+  actor: string;
+  decision: ReviewDecisionType;
+  reason: string;
+  idempotencyKey: string;
+}
+
+export type ReviewDecisionResult =
+  | { status: 'ok'; case: Case; review: HumanReviewRequest; decision: ReviewDecision }
+  | { status: 'error'; error: { code: string; message: string } };
+
 /** Async, server-side data boundary. Implementations: fixtures (default) and AWS. */
 export interface DataProvider {
   readonly source: DataSource;
@@ -30,5 +45,11 @@ export interface DataProvider {
   getMerchantProfile(merchantId: string): Promise<MerchantProfile | undefined>;
   listHumanReviewRequests(): Promise<HumanReviewRequest[]>;
   listAuditEvents(caseId: string): Promise<AuditEvent[]>;
+  /**
+   * Record an investigator decision. This is the only path that may change a case's status from
+   * the dashboard -- see packages/contracts README "Review decision workflow" for the state
+   * machine and this file's callers for the authorization boundary in front of it.
+   */
+  submitReviewDecision(input: ReviewDecisionInput): Promise<ReviewDecisionResult>;
   status(): DataStatus;
 }

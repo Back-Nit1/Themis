@@ -1,7 +1,7 @@
 import type { AuditEvent, Case, CaseReport, HumanReviewRequest, MerchantProfile } from '@themis/contracts';
-import type { DataProvider, DataSource, DataStatus } from './provider';
+import type { DataProvider, DataSource, DataStatus, ReviewDecisionInput, ReviewDecisionResult } from './provider';
 
-export type { DataStatus } from './provider';
+export type { DataStatus, ReviewDecisionInput, ReviewDecisionResult } from './provider';
 export { DataSourceError } from './provider';
 
 let provider: DataProvider | undefined;
@@ -50,6 +50,11 @@ export async function getMerchantProfile(merchantId: string): Promise<MerchantPr
 
 export async function auditEventsForCase(caseId: string): Promise<AuditEvent[]> {
   return (await getProvider()).listAuditEvents(caseId);
+}
+
+/** The only dashboard path that may change a case's status; route handlers call this, never components directly. */
+export async function submitReviewDecision(input: ReviewDecisionInput): Promise<ReviewDecisionResult> {
+  return (await getProvider()).submitReviewDecision(input);
 }
 
 /** Read after the page's own data reads so it reflects them (stale copies, skipped records). */
