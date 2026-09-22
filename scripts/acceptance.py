@@ -22,7 +22,7 @@ from typing import Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_CONTRACT_VERSION = "2026-09-20"
+EXPECTED_CONTRACT_VERSION = "2026-09-22"
 EXPECTED_TOOLS = (
     "search_transactions",
     "get_transaction_details",
