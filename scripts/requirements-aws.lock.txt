@@ -1,0 +1,25 @@
+# Deterministic AWS runtime dependency lock for infra/build/agent-runtime.
+#
+# Regenerate with:
+#   python3 -m pip download --no-deps --dest /tmp/themis-boto3-dl \
+#     boto3==<version> botocore==<version> jmespath==<version> \
+#     python-dateutil==<version> s3transfer==<version> six==<version> urllib3==<version>
+#   shasum -a 256 /tmp/themis-boto3-dl/*
+#
+# Consumed by scripts/build_assets.py --with-boto3 via `pip install --require-hashes`.
+# All packages are pure-python (py3-none-any) so one lock covers every deploy platform.
+
+boto3==1.43.100 \
+    --hash=sha256:49785c310057c2c650d62ca3ba28e88ad87c3827b490312711e81968a9d21fd8
+botocore==1.43.100 \
+    --hash=sha256:34c3232bc0f895091a15249903b3cab1148f5787f12389caa2d54a9175428d51
+jmespath==1.1.0 \
+    --hash=sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64
+python-dateutil==2.9.0.post0 \
+    --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+s3transfer==0.19.2 \
+    --hash=sha256:d8168eccca828cbb2cd573675333f3bddd254313a9c42494b84c76b539e8ba25
+six==1.17.0 \
+    --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+urllib3==2.8.0 \
+    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
