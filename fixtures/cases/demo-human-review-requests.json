@@ -1,5 +1,6 @@
 [
   {
+    "reviewId": "review_case_demo_d_001",
     "caseId": "case_demo_d",
     "reason": "CONFLICTING_AUTHORIZATION_EVIDENCE",
     "summary": "I did not authorize this transaction; strong authentication conflicts with the claim.",
@@ -7,6 +8,7 @@
     "evidenceRefs": [
       "ev_demo_d_claim",
       "ev_demo_d_ledger"
-    ]
+    ],
+    "status": "PENDING"
   }
 ]

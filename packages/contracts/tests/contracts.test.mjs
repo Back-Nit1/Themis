@@ -97,6 +97,35 @@ test('normal lifecycle, waiting loops, and human review are explicit', () => {
   for (const targets of Object.values(c.CASE_STATUS_TRANSITIONS)) for (const target of targets) c.CaseStatusSchema.parse(target);
 });
 
+test('review decisions: shape, target-status map, and the transition guard', async () => {
+  const [review] = await load('cases/human-review-requests');
+  assert.equal(review.status, 'PENDING');
+  assert.ok(review.reviewId);
+  assert.equal(c.HumanReviewRequestSchema.safeParse({...review, status: 'ONGOING'}).success, false);
+  assert.equal(c.HumanReviewRequestSchema.safeParse((({ reviewId, ...rest }) => rest)(review)).success, false);
+
+  const decision = {
+    decisionId: 'decision_001', reviewId: review.reviewId, caseId: review.caseId, actor: 'investigator_jane',
+    decision: 'APPROVE', reason: 'Evidence is sufficient.', decidedAt: '2026-09-22T00:00:00Z',
+    idempotencyKey: 'idem_review_001',
+  };
+  assert.equal(c.ReviewDecisionSchema.safeParse(decision).success, true);
+  for (const patch of [{decision: 'MAYBE'}, {actor: ''}, {idempotencyKey: ''}, {extra: true}]) {
+    assert.equal(c.ReviewDecisionSchema.safeParse({...decision, ...patch}).success, false);
+  }
+  assert.deepEqual(c.REVIEW_DECISION_TARGET_STATUS, {
+    APPROVE: 'ACTION_APPROVED', REJECT: 'INVESTIGATING', REQUEST_MORE_EVIDENCE: 'INVESTIGATING',
+  });
+
+  const [caseRecord] = await load('cases/cases');
+  const kase = {...caseRecord, status: 'NEEDS_HUMAN_REVIEW'};
+  c.assertReviewDecisionTransition(kase, review, decision);
+  assert.throws(() => c.assertReviewDecisionTransition({...kase, status: 'INVESTIGATING'}, review, decision), /awaiting human review/);
+  assert.throws(() => c.assertReviewDecisionTransition(kase, {...review, status: 'RESOLVED'}, decision), /already decided/);
+  assert.throws(() => c.assertReviewDecisionTransition(kase, review, {...decision, reviewId: 'review_other'}), /same case and review/);
+  assert.throws(() => c.assertReviewDecisionTransition(kase, {...review, caseId: 'case_other'}, decision), /same case and review/);
+});
+
 test('generated JSON Schemas stay aligned with all exported runtime schemas', async () => {
   const generated = JSON.parse(await readFile(new URL('../schemas.json', import.meta.url), 'utf8'));
   const expected = Object.fromEntries(Object.entries(c).filter(([name]) => name.endsWith('Schema')).map(([name, schema]) => [name.slice(0, -6), z.toJSONSchema(schema)]));

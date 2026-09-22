@@ -106,9 +106,9 @@ export function buildDemoFixtures() {
     };
     audits.push(audit);
     const review = requiresHumanReview ? [{
-      caseId, reason: 'CONFLICTING_AUTHORIZATION_EVIDENCE', summary,
+      reviewId: `review_${caseId}_001`, caseId, reason: 'CONFLICTING_AUTHORIZATION_EVIDENCE', summary,
       recommendedNextStep: 'Review merchant authorization evidence without assuming customer dishonesty.',
-      evidenceRefs: record.evidenceIds,
+      evidenceRefs: record.evidenceIds, status: 'PENDING',
     }] : [];
     reviews.push(...review);
     const report = {

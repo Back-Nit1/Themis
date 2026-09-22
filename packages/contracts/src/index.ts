@@ -114,8 +114,24 @@ export const AuditEventSchema = z.strictObject({
   inputAmount: money.optional(),
   humanApprovalRequired: z.boolean().optional(),
 });
+export const ReviewRequestStatusSchema = z.enum(['PENDING', 'RESOLVED']);
 export const HumanReviewRequestSchema = z.strictObject({
-  caseId: id, reason: text, summary: text, recommendedNextStep: text, evidenceRefs: ids,
+  reviewId: id, caseId: id, reason: text, summary: text, recommendedNextStep: text, evidenceRefs: ids,
+  status: ReviewRequestStatusSchema,
+});
+
+// Investigator decisions on an open HumanReviewRequest (prompt.md investigator review workflow).
+export const ReviewDecisionTypeSchema = z.enum(['APPROVE', 'REJECT', 'REQUEST_MORE_EVIDENCE']);
+export const ReviewDecisionSchema = z.strictObject({
+  decisionId: id, reviewId: id, caseId: id, actor: text,
+  decision: ReviewDecisionTypeSchema, reason: text, decidedAt: timestamp, idempotencyKey: id,
+});
+
+// Case-status target for each decision. REJECT and REQUEST_MORE_EVIDENCE both return the case to
+// INVESTIGATING (the only "send it back" edge NEEDS_HUMAN_REVIEW has); the decision record itself,
+// not the case status, is what distinguishes why. See README "Review decision workflow".
+export const REVIEW_DECISION_TARGET_STATUS: Readonly<Record<z.infer<typeof ReviewDecisionTypeSchema>, CaseStatus>> = Object.freeze({
+  APPROVE: 'ACTION_APPROVED', REJECT: 'INVESTIGATING', REQUEST_MORE_EVIDENCE: 'INVESTIGATING',
 });
 export const MessageChannelSchema = z.enum(['RCS', 'SMS', 'EMAIL']);
 export const InboundMessageSchema = z.strictObject({
@@ -151,6 +167,9 @@ export type ResolutionProposal = z.infer<typeof ResolutionProposalSchema>;
 export type PolicyDecision = z.infer<typeof PolicyDecisionSchema>;
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
 export type HumanReviewRequest = z.infer<typeof HumanReviewRequestSchema>;
+export type ReviewRequestStatus = z.infer<typeof ReviewRequestStatusSchema>;
+export type ReviewDecisionType = z.infer<typeof ReviewDecisionTypeSchema>;
+export type ReviewDecision = z.infer<typeof ReviewDecisionSchema>;
 export type InboundMessage = z.infer<typeof InboundMessageSchema>;
 export type OutboundMessage = z.infer<typeof OutboundMessageSchema>;
 export type CaseReport = z.infer<typeof CaseReportSchema>;
@@ -175,4 +194,25 @@ export function assertCaseTransition(current: Case, next: Case): void {
       next.outcome !== 'CUSTOMER_RECOGNIZED_MERCHANT') {
     throw new Error('Early resolution requires customer recognition of the merchant');
   }
+}
+
+/**
+ * Validate an investigator decision against the case and the review it targets. Shape/identity and
+ * business-rule checks only -- it does not check who `decision.actor` is; the calling service owns
+ * that authorization boundary (see README "Review decision workflow").
+ */
+export function assertReviewDecisionTransition(kase: Case, review: HumanReviewRequest, decision: ReviewDecision): void {
+  CaseSchema.parse(kase);
+  HumanReviewRequestSchema.parse(review);
+  ReviewDecisionSchema.parse(decision);
+  if (review.caseId !== kase.caseId || decision.caseId !== kase.caseId || decision.reviewId !== review.reviewId) {
+    throw new Error('Review decision must reference the same case and review it is deciding');
+  }
+  if (kase.status !== 'NEEDS_HUMAN_REVIEW') {
+    throw new Error(`case ${kase.caseId} is not awaiting human review (status=${kase.status})`);
+  }
+  if (review.status !== 'PENDING') {
+    throw new Error(`review ${review.reviewId} was already decided`);
+  }
+  assertCaseStatusTransition(kase.status, REVIEW_DECISION_TARGET_STATUS[decision.decision]);
 }

@@ -1,11 +1,13 @@
 [
   {
+    "reviewId": "review_case_001_001",
     "caseId": "case_001",
     "reason": "MISSING_REQUIRED_EVIDENCE",
     "summary": "Authorization has not been established.",
     "recommendedNextStep": "Request merchant authorization evidence.",
     "evidenceRefs": [
       "ev_001"
-    ]
+    ],
+    "status": "PENDING"
   }
 ]

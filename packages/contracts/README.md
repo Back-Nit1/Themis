@@ -23,3 +23,45 @@ The schemas validate individual documents, not database references, policy corre
 Canonical action names follow section 25: `CREATE_DISPUTE`, `PROVISIONAL_CREDIT`, `BLOCK_RECURRING_MERCHANT`, `REPLACE_CARD`, `DENY_CASE`, with `REVIEW_FUTURE_RECURRING_PAYMENT` from section 23 and `REQUEST_MERCHANT_EVIDENCE` from section 24. The bootstrap-only names `BLOCK_MERCHANT_PAYMENT`, `CLOSE_CARD`, and `DENY_DISPUTE` were replaced before service implementation. Workers should consume `ActionSchema`, not maintain aliases.
 
 The complete modest fixture set lives in `fixtures/**/demo*.json`, separate from the original single-record examples. See `fixtures/README.md` to regenerate it. These are scenario snapshots and expected inputs/results for other workers, not an implemented agent, ledger, policy engine or message transport.
+
+## Review decision workflow
+
+`HumanReviewRequestSchema` now carries `reviewId` (stable identity) and `status` (`PENDING` |
+`RESOLVED`), so a request can be referenced and later resolved instead of only ever being appended.
+`ReviewDecisionSchema` is the record of an investigator acting on one: `decisionId`, `reviewId`,
+`caseId`, `actor`, `decision` (`APPROVE` | `REJECT` | `REQUEST_MORE_EVIDENCE`), `reason`, `decidedAt`,
+`idempotencyKey`.
+
+**State transition.** `REVIEW_DECISION_TARGET_STATUS` maps each decision to the case status it
+produces:
+
+| decision | target case status |
+| --- | --- |
+| `APPROVE` | `ACTION_APPROVED` |
+| `REJECT` | `INVESTIGATING` |
+| `REQUEST_MORE_EVIDENCE` | `INVESTIGATING` |
+
+`NEEDS_HUMAN_REVIEW` only has three outgoing edges (`INVESTIGATING`, `RESOLUTION_PROPOSED`,
+`ACTION_APPROVED` — see "Case state machine" above); `REJECT` and `REQUEST_MORE_EVIDENCE` both use
+the `INVESTIGATING` edge; the decision record — not the case status — is what distinguishes "this
+proposal was wrong" from "this proposal needs more support" for whoever picks the case back up.
+`RESOLUTION_PROPOSED` stays reserved for an investigator authoring their own revised proposal, which
+this workflow does not do.
+
+**Preconditions**, enforced by `assertReviewDecisionTransition(case, review, decision)` and by every
+service that executes a decision: the case must be `NEEDS_HUMAN_REVIEW`; the review must belong to
+that case and be `PENDING`; the decision's `caseId`/`reviewId` must match. A decision against a
+`RESOLVED` review (already decided, e.g. a duplicate or racing submission) or a case no longer
+`NEEDS_HUMAN_REVIEW` (stale) is rejected, not silently applied. `idempotencyKey` makes a retried
+submission of the *same* decision replay its prior result instead of double-applying it (services
+own the replay store, as with every other mutating tool — see section 31 in `KNOWN ISSUES /
+DECISIONS`). Approving a decision never itself executes the underlying financial action; it only
+records the case as `ACTION_APPROVED`, which remains a separate, policy-gated execution step.
+
+**Authorization.** This package validates shape and the state machine only — it has no notion of who
+`actor` is or what they are allowed to decide, matching every other schema here. Each caller owns
+that boundary: `services/bank-tools` trusts `actor` as an already-authenticated audit label supplied
+by its caller (the Gateway, for the agent path); a browser-facing caller (the dashboard) must sit
+behind its own server-side authentication/authorization boundary before it ever reaches a mutating
+tool — see `apps/dashboard`'s review-decision route for the current boundary. Never accept a review
+decision from an unauthenticated public endpoint.
