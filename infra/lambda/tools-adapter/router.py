@@ -1,7 +1,7 @@
-"""Composition of the 20 Gateway tools over their owning services.
+"""Composition of the 21 Gateway tools over their owning services.
 
 `TOOL_OWNERS` is the frozen ownership map (tests/test_tool_mapping.py checks it against
-infra/config/tool-schemas.ts). All 20 tools run through bank_tools.dispatch, so camelCase argument
+infra/config/tool-schemas.ts). All 21 tools run through bank_tools.dispatch, so camelCase argument
 validation, snake_case mapping and idempotencyKey claim/replay are identical no matter who owns the tool.
 Owners other than bank-tools are registered as extra Specs.
 """
@@ -20,6 +20,7 @@ TOOL_OWNERS: dict[str, str] = {
         "search_transactions", "get_transaction_details", "get_transaction_auth_signals", "find_related_transactions",
         "get_customer_dispute_history", "get_case", "create_case", "update_case", "save_evidence",
         "propose_payment_block", "propose_card_replacement", "propose_dispute_creation", "propose_provisional_credit",
+        "submit_review_decision",
     ), "bank-tools"),
     **dict.fromkeys(("resolve_merchant", "get_merchant_profile", "get_merchant_risk_signals"), "merchant-intel"),
     **dict.fromkeys(("generate_case_report", "escalate_case"), "agentcore"),

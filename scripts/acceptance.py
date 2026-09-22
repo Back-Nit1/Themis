@@ -41,6 +41,7 @@ EXPECTED_TOOLS = (
     "propose_card_replacement",
     "propose_dispute_creation",
     "propose_provisional_credit",
+    "submit_review_decision",
     "escalate_case",
     "send_customer_message",
     "send_case_email",
@@ -54,6 +55,7 @@ EXPECTED_IDEMPOTENT_TOOLS = (
     "propose_card_replacement",
     "propose_dispute_creation",
     "propose_provisional_credit",
+    "submit_review_decision",
     "escalate_case",
     "send_customer_message",
     "send_case_email",
@@ -186,13 +188,13 @@ def check_contract(root: Path) -> Result:
     if version != EXPECTED_CONTRACT_VERSION:
         problems.append(f"version is {version!r}, expected {EXPECTED_CONTRACT_VERSION!r}")
     if tuple(tools) != EXPECTED_TOOLS:
-        problems.append("tool names/order differ from the frozen 20-tool contract")
-    if len(set(tools)) != 20:
-        problems.append(f"found {len(tools)} entries and {len(set(tools))} unique names, expected 20")
+        problems.append(f"tool names/order differ from the frozen {len(EXPECTED_TOOLS)}-tool contract")
+    if len(set(tools)) != len(EXPECTED_TOOLS):
+        problems.append(f"found {len(tools)} entries and {len(set(tools))} unique names, expected {len(EXPECTED_TOOLS)}")
     if tuple(idempotent) != EXPECTED_IDEMPOTENT_TOOLS:
         problems.append("required idempotencyKey tools differ from the frozen mutation set")
     status = "FAIL" if problems else "PASS"
-    message = "; ".join(problems) if problems else "Frozen versioned 20-tool contract and mutation idempotency fields match."
+    message = "; ".join(problems) if problems else f"Frozen versioned {len(EXPECTED_TOOLS)}-tool contract and mutation idempotency fields match."
     return _result("contract.frozen-tools", "contract", status, message, started, version=version, tools=tools, idempotentTools=idempotent)
 
 

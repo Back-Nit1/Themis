@@ -61,3 +61,25 @@ Install: `python3 -m pip install -e services/bank-tools`.
 - `dispatch.OUTCOME_SPECS`: update_case with optional `outcome` (CUSTOMER_RECOGNIZED_MERCHANT). Kept out of `SPECS` so the TS-contract drift test still passes; move it in when Infra adds the field.
 - `propose_*` no longer queues a duplicate POLICY_REQUIRES_REVIEW request on a repeat call with a new idempotency key.
 - `BankToolsStorage` protocol now lists `human_review_requests_for_case`.
+
+## Investigator review decisions (branch agent/release/investigator-review-workflow)
+
+- New 21st tool `submit_review_decision(case_id, review_id, actor, decision, reason, idempotency_key)`:
+  APPROVE/REJECT/REQUEST_MORE_EVIDENCE against a PENDING `HumanReviewRequest` on a
+  NEEDS_HUMAN_REVIEW case. Registered in `dispatch.SPECS`, `infra/config/tool-schemas.ts`,
+  `infra/lambda/tools-adapter/router.TOOL_OWNERS`, and `scripts/acceptance.py`'s frozen-tool lists
+  (all four had to move together or their respective drift tests fail).
+- `HumanReviewRequest` now carries `reviewId` (stable key, defaulted so `escalate_case` in
+  `services/agent/src/orchestrator/workflow.py` needed no change) and `status`
+  (PENDING/RESOLVED). New `ReviewDecision` record, stored like a mutable entity (`replace_case`
+  pattern) not an immutable audit-log row, since it has a PENDING -> RESOLVED lifecycle; Dynamo
+  keys it by `reviewId` now instead of a fresh id per call.
+- Every attempt is audited, not just successes: `record_audit` runs on each rejection path
+  (`REVIEW_DECISION_REJECTED:<code>`) instead of relying on `_guarded` to swallow the exception.
+- Known gap: case-row and review-row writes are two separate, non-transactional Dynamo puts; a
+  crash between them leaves the review PENDING against a case that already moved, and a same-key
+  retry then reports INVALID_TRANSITION instead of completing (same limitation as the rest of
+  this store -- needs the version-attribute/TransactWriteItems fix already in NEXT TASKS #3).
+- 161 tests now; `tests/test_review_decisions.py` covers approve, reject,
+  request-more-evidence, replay, conflicting decision, invalid transition, malformed input,
+  unknown review, and a simulated backend failure.

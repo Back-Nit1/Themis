@@ -19,6 +19,12 @@ CORE_MODELS_AND_FIXTURES_COMPLETE — ready for integration and consuming worker
 - RCS/SMS inbound and RCS/SMS/EMAIL outbound fixture coverage; nothing sent externally.
 - Fixture integrity validator and negative tests for corrupted references, totals and snapshots.
 - 33 passing contracts tests; no new dependencies or service implementation.
+- Investigator review-decision workflow (branch `agent/release/investigator-review-workflow`):
+  `HumanReviewRequest` gains `reviewId`/`status` (PENDING/RESOLVED); new `ReviewDecisionSchema`
+  and `REVIEW_DECISION_TARGET_STATUS`; `assertReviewDecisionTransition` enforces
+  NEEDS_HUMAN_REVIEW + PENDING-review preconditions. No CASE_STATUS_TRANSITIONS edges added —
+  REJECT and REQUEST_MORE_EVIDENCE both reuse the existing INVESTIGATING edge. Documented in
+  README "Review decision workflow". 36 contracts tests now (was 35).
 
 ## CURRENT INTERFACES
 
@@ -61,7 +67,7 @@ CORE_MODELS_AND_FIXTURES_COMPLETE — ready for integration and consuming worker
 
 ## LAST TEST COMMAND + RESULT
 
-- `npm test --workspace @themis/contracts` — build passed; 35 tests passed, 0 failures.
+- `npm test --workspace @themis/contracts` — build passed; 36 tests passed, 0 failures.
 - `git diff --check` — passed.
 
 ## LAST CODE COMMIT

@@ -1,4 +1,4 @@
-"""Frozen mapping of the 20 Gateway tools: owner, camelCase arguments, idempotencyKey."""
+"""Frozen mapping of the 21 Gateway tools: owner, camelCase arguments, idempotencyKey."""
 import re
 
 import harness  # noqa: F401
@@ -28,8 +28,8 @@ def adapter_specs():
     return {**SPECS, **comp.adapter.specs}
 
 
-def test_gateway_declares_exactly_the_20_owned_tools():
-    assert set(gateway_tools()) == set(TOOL_OWNERS) and len(TOOL_OWNERS) == 20
+def test_gateway_declares_exactly_the_21_owned_tools():
+    assert set(gateway_tools()) == set(TOOL_OWNERS) and len(TOOL_OWNERS) == 21
     assert set(TOOL_OWNERS.values()) == {"bank-tools", "merchant-intel", "agentcore", "messaging"}
 
 

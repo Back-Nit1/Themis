@@ -531,6 +531,10 @@
         "items": {
           "type": "object",
           "properties": {
+            "reviewId": {
+              "type": "string",
+              "minLength": 1
+            },
             "caseId": {
               "type": "string",
               "minLength": 1
@@ -553,14 +557,23 @@
                 "type": "string",
                 "minLength": 1
               }
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "RESOLVED"
+              ]
             }
           },
           "required": [
+            "reviewId",
             "caseId",
             "reason",
             "summary",
             "recommendedNextStep",
-            "evidenceRefs"
+            "evidenceRefs",
+            "status"
           ],
           "additionalProperties": false
         }
@@ -899,6 +912,10 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {
+      "reviewId": {
+        "type": "string",
+        "minLength": 1
+      },
       "caseId": {
         "type": "string",
         "minLength": 1
@@ -921,14 +938,23 @@
           "type": "string",
           "minLength": 1
         }
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "RESOLVED"
+        ]
       }
     },
     "required": [
+      "reviewId",
       "caseId",
       "reason",
       "summary",
       "recommendedNextStep",
-      "evidenceRefs"
+      "evidenceRefs",
+      "status"
     ],
     "additionalProperties": false
   },
@@ -1384,6 +1410,77 @@
       "requiresHumanReview"
     ],
     "additionalProperties": false
+  },
+  "ReviewDecision": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "decisionId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "reviewId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "caseId": {
+        "type": "string",
+        "minLength": 1
+      },
+      "actor": {
+        "type": "string",
+        "minLength": 1
+      },
+      "decision": {
+        "type": "string",
+        "enum": [
+          "APPROVE",
+          "REJECT",
+          "REQUEST_MORE_EVIDENCE"
+        ]
+      },
+      "reason": {
+        "type": "string",
+        "minLength": 1
+      },
+      "decidedAt": {
+        "type": "string",
+        "format": "date-time",
+        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+      },
+      "idempotencyKey": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "required": [
+      "decisionId",
+      "reviewId",
+      "caseId",
+      "actor",
+      "decision",
+      "reason",
+      "decidedAt",
+      "idempotencyKey"
+    ],
+    "additionalProperties": false
+  },
+  "ReviewDecisionType": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "APPROVE",
+      "REJECT",
+      "REQUEST_MORE_EVIDENCE"
+    ]
+  },
+  "ReviewRequestStatus": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "string",
+    "enum": [
+      "PENDING",
+      "RESOLVED"
+    ]
   },
   "TransactionAuthSignals": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
