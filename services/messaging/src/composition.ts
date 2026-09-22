@@ -16,6 +16,8 @@ export interface RuntimeEnvironment {
   readonly agentRuntimeQualifier?: string;
   readonly topics: Readonly<Record<string, Channel>>;
   readonly rcsEnabled: boolean;
+  readonly smsEnabled: boolean;
+  readonly sesEnabled: boolean;
   /** Trusted SNS topic for delivery events; absent = delivery events not consumed. Never an inbound topic. */
   readonly deliveryEventTopicArn?: string;
 }
@@ -32,6 +34,14 @@ function enabled(env: Record<string, string | undefined>, name: string): boolean
   return value === 'true';
 }
 
+/** Like `enabled`, but defaults when absent instead of requiring the variable. */
+function optionalEnabled(env: Record<string, string | undefined>, name: string, fallback: boolean): boolean {
+  const raw = env[name];
+  if (raw === undefined) return fallback;
+  if (raw !== 'true' && raw !== 'false') throw new Error(`${name} must be true or false`);
+  return raw === 'true';
+}
+
 function topicArn(value: string, name: string): string {
   if (!/^arn:(?:aws|aws-us-gov|aws-cn):sns:[a-z0-9-]+:\d{12}:[A-Za-z0-9_.-]+$/.test(value)) {
     throw new Error(`Invalid ${name}`);
@@ -44,6 +54,7 @@ export function parseRuntimeEnvironment(env: Record<string, string | undefined>)
   const enableRcs = enabled(env, 'ENABLE_RCS');
   const enableSms = enabled(env, 'ENABLE_SMS_FALLBACK');
   if (!enableRcs && !enableSms) throw new Error('At least one inbound messaging channel must be enabled');
+  const enableSes = optionalEnabled(env, 'ENABLE_SES', true);
 
   const topics: Record<string, Channel> = {};
   if (enableRcs) topics[topicArn(required(env, 'THEMIS_RCS_TOPIC_ARN'), 'THEMIS_RCS_TOPIC_ARN')] = 'RCS';
@@ -70,6 +81,8 @@ export function parseRuntimeEnvironment(env: Record<string, string | undefined>)
     ...(qualifier ? { agentRuntimeQualifier: qualifier } : {}),
     topics: Object.freeze(topics),
     rcsEnabled: enableRcs,
+    smsEnabled: enableSms,
+    sesEnabled: enableSes,
     ...(deliveryEventTopicArn ? { deliveryEventTopicArn } : {}),
   });
 }
@@ -98,11 +111,17 @@ export function createMessagingRuntime(env: Record<string, string | undefined>, 
     dependencies.agentRuntime,
     config.agentRuntimeQualifier,
   );
+  // Each identity is required only when its transport is enabled, and only when outbound sending is
+  // actually composed (a messagingClient is injected); a disabled transport gets an empty identity, so
+  // sending on it fails explicitly (messagingPayload) instead of using a dummy value.
   const channel = dependencies.messagingClient
-    ? new ChannelAdapter({ mode: 'aws', rcsIdentity: required(env, 'THEMIS_RCS_POOL_ID'), smsIdentity: required(env, 'THEMIS_SMS_IDENTITY') },
-      dependencies.messagingClient)
+    ? new ChannelAdapter({
+        mode: 'aws',
+        rcsIdentity: config.rcsEnabled ? required(env, 'THEMIS_RCS_POOL_ID') : '',
+        smsIdentity: config.smsEnabled ? required(env, 'THEMIS_SMS_IDENTITY') : '',
+      }, dependencies.messagingClient)
     : undefined;
-  const email = dependencies.sesClient ? new SesAdapter('aws', dependencies.sesClient) : undefined;
+  const email = config.sesEnabled && dependencies.sesClient ? new SesAdapter('aws', dependencies.sesClient) : undefined;
   const deliveries = dependencies.deliveryStore ?? new DynamoDeliveryStore(config.idempotencyTable, dependencies.dynamo);
   const outbound = channel ? new OutboundService({ channel, menus: activeMenus, deliveries, rcsEnabled: config.rcsEnabled }) : undefined;
   const processor = new InboundProcessor(
@@ -149,10 +168,12 @@ export function createMessagingRuntime(env: Record<string, string | undefined>, 
   });
   // Tools-adapter Lambda invokes this function directly ({themisTool, ...}) for send_customer_message / send_case_email.
   const handleTool = async (event: ToolEvent) => {
-    if (event.themisTool === 'send_customer_message' && channel) {
+    if (event.themisTool === 'send_customer_message') {
+      if (!channel) throw new Error('Messaging transports are disabled; cannot send customer message');
       return { messageId: (await outbound!.deliver(OutboundMessageSchema.parse(event.message))).providerMessageId };
     }
-    if (event.themisTool === 'send_case_email' && email) {
+    if (event.themisTool === 'send_case_email') {
+      if (!email) throw new Error('SES is disabled; cannot send case email');
       return await sendCaseNotification(email, deliveries, {
         case: event.case as never, report: event.report as never, recipient: String(event.recipient),
         nextSteps: event.nextSteps as string[], sender: required(env, 'THEMIS_SES_FROM'), support: required(env, 'THEMIS_SUPPORT') });

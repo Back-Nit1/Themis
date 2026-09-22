@@ -82,10 +82,18 @@ export class MessagingStack extends cdk.Stack {
     }));
 
     // Outbound: agent replies and the send_* tools. Identities are provisioned manually (see infra README).
-    normalizerRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['sms-voice:SendTextMessage', 'sms-voice:SendRcsMessage'],
-      resources: [`arn:aws:sms-voice:${this.region}:${this.account}:*`],
-    }));
+    // Plain-text sends (including RCS text without suggestions) always use SendTextMessage; rich RCS
+    // suggestions additionally need SendRcsMessage, granted only when RCS is enabled.
+    const smsVoiceActions = [
+      ...(config.enableRcs || config.enableSmsFallback ? ['sms-voice:SendTextMessage'] : []),
+      ...(config.enableRcs ? ['sms-voice:SendRcsMessage'] : []),
+    ];
+    if (smsVoiceActions.length) {
+      normalizerRole.addToPolicy(new iam.PolicyStatement({
+        actions: smsVoiceActions,
+        resources: [`arn:aws:sms-voice:${this.region}:${this.account}:*`],
+      }));
+    }
     if (config.enableSes) {
       normalizerRole.addToPolicy(new iam.PolicyStatement({
         actions: ['ses:SendEmail'],
@@ -114,13 +122,11 @@ export class MessagingStack extends cdk.Stack {
         AGENT_RUNTIME_ARN: agent.runtime.attrAgentRuntimeArn,
         ENABLE_RCS: String(config.enableRcs),
         ENABLE_SMS_FALLBACK: String(config.enableSmsFallback),
-        ...(config.enableRcs ? { THEMIS_RCS_TOPIC_ARN: this.rcsInboundTopic.topicArn } : {}),
-        ...(config.enableSmsFallback ? { THEMIS_SMS_TOPIC_ARN: this.inboundTopic.topicArn } : {}),
+        ENABLE_SES: String(config.enableSes),
+        ...(config.enableRcs ? { THEMIS_RCS_TOPIC_ARN: this.rcsInboundTopic.topicArn, THEMIS_RCS_POOL_ID: config.rcsPoolId } : {}),
+        ...(config.enableSmsFallback ? { THEMIS_SMS_TOPIC_ARN: this.inboundTopic.topicArn, THEMIS_SMS_IDENTITY: config.smsIdentity } : {}),
         THEMIS_DELIVERY_EVENT_TOPIC_ARN: this.deliveryEventTopic.topicArn,
-        THEMIS_RCS_POOL_ID: config.rcsPoolId,
-        THEMIS_SMS_IDENTITY: config.smsIdentity,
-        THEMIS_SES_FROM: config.sesFromAddress,
-        THEMIS_SUPPORT: config.supportContact,
+        ...(config.enableSes ? { THEMIS_SES_FROM: config.sesFromAddress, THEMIS_SUPPORT: config.supportContact } : {}),
       },
     });
     for (const topic of new Set([this.inboundTopic, this.rcsInboundTopic])) {
@@ -152,10 +158,12 @@ export class MessagingStack extends cdk.Stack {
       actions: ['dynamodb:Query'],
       resources: [`${data.idempotencyTable.tableArn}/index/${CLAIM_INDEX}`],
     }));
-    reconcilerRole.addToPolicy(new iam.PolicyStatement({
-      actions: ['sms-voice:SendTextMessage', 'sms-voice:SendRcsMessage'],
-      resources: [`arn:aws:sms-voice:${this.region}:${this.account}:*`],
-    }));
+    if (smsVoiceActions.length) {
+      reconcilerRole.addToPolicy(new iam.PolicyStatement({
+        actions: smsVoiceActions,
+        resources: [`arn:aws:sms-voice:${this.region}:${this.account}:*`],
+      }));
+    }
     const reconcilerLogGroup = new logs.LogGroup(this, 'ReconcilerLogGroup', {
       logGroupName: '/aws/lambda/ThemisClaimReconciler',
       retention: logs.RetentionDays.TWO_WEEKS,
@@ -174,8 +182,9 @@ export class MessagingStack extends cdk.Stack {
       environment: {
         IDEMPOTENCY_TABLE: data.idempotencyTable.tableName,
         ENABLE_RCS: String(config.enableRcs),
-        THEMIS_RCS_POOL_ID: config.rcsPoolId,
-        THEMIS_SMS_IDENTITY: config.smsIdentity,
+        ENABLE_SMS_FALLBACK: String(config.enableSmsFallback),
+        ...(config.enableRcs ? { THEMIS_RCS_POOL_ID: config.rcsPoolId } : {}),
+        ...(config.enableSmsFallback ? { THEMIS_SMS_IDENTITY: config.smsIdentity } : {}),
         // Bounds. Stale threshold must stay well above the normalizer timeout (15s) so the original attempt is dead.
         RECONCILE_STALE_SECONDS: '300',
         RECONCILE_LEASE_SECONDS: '240',

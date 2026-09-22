@@ -95,6 +95,33 @@ test('inbound service role can publish to inbound topics but never the delivery-
   assert.equal(policyJson.includes(deliveryId), false);
 });
 
+test('normalizer Lambda environment includes only enabled-capability variables', () => {
+  const rcsOnly = synth({ enableRcs: true, enableSmsFallback: false, enableSes: false });
+  const rcsOnlyFn = Object.values(rcsOnly.findResources('AWS::Lambda::Function'))
+    .find(f => f.Properties.FunctionName === 'ThemisMessageNormalizer');
+  const rcsOnlyVars = rcsOnlyFn.Properties.Environment.Variables;
+  assert.ok('THEMIS_RCS_POOL_ID' in rcsOnlyVars);
+  assert.ok(!('THEMIS_SMS_IDENTITY' in rcsOnlyVars));
+  assert.ok(!('THEMIS_SES_FROM' in rcsOnlyVars));
+  assert.ok(!('THEMIS_SUPPORT' in rcsOnlyVars));
+
+  const smsOnly = synth({ enableRcs: false, enableSmsFallback: true, enableSes: true });
+  const smsOnlyFn = Object.values(smsOnly.findResources('AWS::Lambda::Function'))
+    .find(f => f.Properties.FunctionName === 'ThemisMessageNormalizer');
+  const smsOnlyVars = smsOnlyFn.Properties.Environment.Variables;
+  assert.ok(!('THEMIS_RCS_POOL_ID' in smsOnlyVars));
+  assert.ok('THEMIS_SMS_IDENTITY' in smsOnlyVars);
+  assert.ok('THEMIS_SES_FROM' in smsOnlyVars);
+  assert.ok('THEMIS_SUPPORT' in smsOnlyVars);
+});
+
+test('SES IAM permission granted only when enabled', () => {
+  const on = synth({ enableSes: true });
+  assert.match(JSON.stringify(on.findResources('AWS::IAM::Policy')), /ses:SendEmail/);
+  const off = synth({ enableSes: false });
+  assert.doesNotMatch(JSON.stringify(off.findResources('AWS::IAM::Policy')), /ses:SendEmail/);
+});
+
 test('does not provision a real phone number or pool (manual step, not reproducible in CDK)', () => {
   const t = synth();
   t.resourceCountIs('AWS::SMSVOICE::PhoneNumber', 0);
@@ -122,8 +149,16 @@ test('claim reconciler: scheduled, bounded, and reads open claims through a spar
   t.hasResourceProperties('AWS::Events::Rule', { ScheduleExpression: 'rate(5 minutes)', State: 'ENABLED' });
 });
 
+function roleActions(t, descriptionPrefix) {
+  const roles = t.findResources('AWS::IAM::Role');
+  const roleId = Object.entries(roles).find(([, r]) => r.Properties.Description?.startsWith(descriptionPrefix))[0];
+  const policy = Object.values(t.findResources('AWS::IAM::Policy'))
+    .find(p => p.Properties.Roles?.some(r => r.Ref === roleId));
+  return policy.Properties.PolicyDocument.Statement.flatMap(s => [].concat(s.Action));
+}
+
 test('claim reconciler role: least privilege (no AgentCore, SES, SNS, DeleteItem, Scan, or wildcard actions)', () => {
-  const t = synth();
+  const t = synth({ enableRcs: true, enableSmsFallback: true });
   const roles = t.findResources('AWS::IAM::Role');
   const roleId = Object.entries(roles).find(([, r]) => r.Properties.Description?.startsWith('Scheduled claim reconciler'))[0];
   const policy = Object.values(t.findResources('AWS::IAM::Policy'))
@@ -134,4 +169,26 @@ test('claim reconciler role: least privilege (no AgentCore, SES, SNS, DeleteItem
   const query = statements.find(s => s.Action === 'dynamodb:Query');
   assert.match(JSON.stringify(query.Resource), /index\/ClaimStateIndex/);
   assert.doesNotMatch(JSON.stringify(policy.Properties.PolicyDocument), /bedrock-agentcore|ses:|sns:|"\*"/);
+});
+
+test('normalizer and reconciler sms-voice grants are scoped to enabled transports only', () => {
+  const smsOnly = synth({ enableRcs: false, enableSmsFallback: true });
+  assert.deepEqual(
+    roleActions(smsOnly, 'Scheduled claim reconciler').filter(a => a.startsWith('sms-voice')).sort(),
+    ['sms-voice:SendTextMessage'],
+  );
+  assert.deepEqual(
+    roleActions(smsOnly, 'Execution role for the inbound').filter(a => a.startsWith('sms-voice')).sort(),
+    ['sms-voice:SendTextMessage'],
+  );
+
+  const rcsOnly = synth({ enableRcs: true, enableSmsFallback: false });
+  assert.deepEqual(
+    roleActions(rcsOnly, 'Scheduled claim reconciler').filter(a => a.startsWith('sms-voice')).sort(),
+    ['sms-voice:SendRcsMessage', 'sms-voice:SendTextMessage'],
+  );
+  assert.deepEqual(
+    roleActions(rcsOnly, 'Execution role for the inbound').filter(a => a.startsWith('sms-voice')).sort(),
+    ['sms-voice:SendRcsMessage', 'sms-voice:SendTextMessage'],
+  );
 });

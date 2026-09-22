@@ -70,13 +70,17 @@ export function loadConfig(): ThemisConfig {
     throw new Error('DEMO_CREDIT_CONFIDENCE_THRESHOLD must be between 0 and 1');
   }
 
+  const enableRcs = bool('ENABLE_RCS', false);
+  const enableSmsFallback = bool('ENABLE_SMS_FALLBACK', true);
+  const enableSes = bool('ENABLE_SES', true);
+
   return {
     themisMode,
     region: process.env.AWS_REGION ?? process.env.CDK_DEFAULT_REGION ?? 'us-east-1',
     account: process.env.CDK_DEFAULT_ACCOUNT,
-    enableRcs: bool('ENABLE_RCS', false),
-    enableSmsFallback: bool('ENABLE_SMS_FALLBACK', true),
-    enableSes: bool('ENABLE_SES', true),
+    enableRcs,
+    enableSmsFallback,
+    enableSes,
     enableBrowserResearch: bool('ENABLE_BROWSER_RESEARCH', false),
     browserResearchApproved: bool('BROWSER_RESEARCH_APPROVED', false),
     enableProactiveDetection: bool('ENABLE_PROACTIVE_DETECTION', false),
@@ -84,12 +88,12 @@ export function loadConfig(): ThemisConfig {
     bedrockModelIdFast: requireForAwsMode(process.env.BEDROCK_MODEL_ID_FAST, 'BEDROCK_MODEL_ID_FAST'),
     bedrockModelIdReasoning: requireForAwsMode(process.env.BEDROCK_MODEL_ID_REASONING, 'BEDROCK_MODEL_ID_REASONING'),
     sesSenderDomain: process.env.SES_SENDER_DOMAIN ?? 'themis-demo.example',
-    // The deployed messaging composition constructs all outbound clients at
-    // cold start, so AWS deployments require both channel identities.
-    rcsPoolId: requireForAwsMode(process.env.THEMIS_RCS_POOL_ID, 'THEMIS_RCS_POOL_ID'),
-    smsIdentity: requireForAwsMode(process.env.THEMIS_SMS_IDENTITY, 'THEMIS_SMS_IDENTITY'),
-    sesFromAddress: requireForAwsMode(process.env.THEMIS_SES_FROM, 'THEMIS_SES_FROM'),
-    supportContact: requireForAwsMode(process.env.THEMIS_SUPPORT, 'THEMIS_SUPPORT'),
+    // Each identity is required only when its transport is enabled: a disabled
+    // transport must not force a dummy identifier or construct an unused client.
+    rcsPoolId: enableRcs ? requireForAwsMode(process.env.THEMIS_RCS_POOL_ID, 'THEMIS_RCS_POOL_ID') : (process.env.THEMIS_RCS_POOL_ID ?? ''),
+    smsIdentity: enableSmsFallback ? requireForAwsMode(process.env.THEMIS_SMS_IDENTITY, 'THEMIS_SMS_IDENTITY') : (process.env.THEMIS_SMS_IDENTITY ?? ''),
+    sesFromAddress: enableSes ? requireForAwsMode(process.env.THEMIS_SES_FROM, 'THEMIS_SES_FROM') : (process.env.THEMIS_SES_FROM ?? ''),
+    supportContact: enableSes ? requireForAwsMode(process.env.THEMIS_SUPPORT, 'THEMIS_SUPPORT') : (process.env.THEMIS_SUPPORT ?? ''),
     provisionalCreditAutoApproveLimit,
     creditConfidenceThreshold,
   };
@@ -108,15 +112,17 @@ export function validateDeploymentPreflight(config: ThemisConfig): void {
   if (!config.enableRcs && !config.enableSmsFallback) {
     problems.push('at least one of ENABLE_RCS or ENABLE_SMS_FALLBACK must be true');
   }
-  if (isUnset(config.rcsPoolId)) problems.push('THEMIS_RCS_POOL_ID must be set');
-  if (isUnset(config.smsIdentity)) problems.push('THEMIS_SMS_IDENTITY must be set');
-  if (isUnset(config.sesFromAddress)) problems.push('THEMIS_SES_FROM must be set');
-  if (!config.sesFromAddress.includes('@')) problems.push('THEMIS_SES_FROM must be an email address');
-  if (!config.sesSenderDomain || config.sesSenderDomain.endsWith('.example')) {
-    problems.push('SES_SENDER_DOMAIN must name the verified SES identity');
-  } else if (!config.sesFromAddress.endsWith(`@${config.sesSenderDomain}`)) {
-    problems.push('THEMIS_SES_FROM must belong to SES_SENDER_DOMAIN');
+  if (config.enableRcs && isUnset(config.rcsPoolId)) problems.push('THEMIS_RCS_POOL_ID must be set');
+  if (config.enableSmsFallback && isUnset(config.smsIdentity)) problems.push('THEMIS_SMS_IDENTITY must be set');
+  if (config.enableSes) {
+    if (isUnset(config.sesFromAddress)) problems.push('THEMIS_SES_FROM must be set');
+    if (!config.sesFromAddress.includes('@')) problems.push('THEMIS_SES_FROM must be an email address');
+    if (!config.sesSenderDomain || config.sesSenderDomain.endsWith('.example')) {
+      problems.push('SES_SENDER_DOMAIN must name the verified SES identity');
+    } else if (!config.sesFromAddress.endsWith(`@${config.sesSenderDomain}`)) {
+      problems.push('THEMIS_SES_FROM must belong to SES_SENDER_DOMAIN');
+    }
+    if (isUnset(config.supportContact)) problems.push('THEMIS_SUPPORT must be set');
   }
-  if (isUnset(config.supportContact)) problems.push('THEMIS_SUPPORT must be set');
   if (problems.length) throw new Error(`AWS deployment preflight failed:\n- ${problems.join('\n- ')}`);
 }

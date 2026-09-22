@@ -108,11 +108,18 @@ function bounded(env: Record<string, string | undefined>, name: string, fallback
 export function createReconciler(env: Record<string, string | undefined>, d: ReconcilerDependencies) {
   const table = env.IDEMPOTENCY_TABLE?.trim();
   if (!table) throw new Error('Missing IDEMPOTENCY_TABLE');
-  const rcsIdentity = env.THEMIS_RCS_POOL_ID?.trim(); const smsIdentity = env.THEMIS_SMS_IDENTITY?.trim();
-  if (!rcsIdentity || !smsIdentity) throw new Error('Missing messaging identities');
+  const enableRcs = env.ENABLE_RCS?.trim() === 'true';
+  const enableSms = env.ENABLE_SMS_FALLBACK?.trim() === 'true';
+  if (!enableRcs && !enableSms) throw new Error('At least one inbound messaging channel must be enabled');
+  // Each identity is required only when its transport is enabled: a disabled transport must not force a
+  // dummy identifier.
+  if (enableRcs && !env.THEMIS_RCS_POOL_ID?.trim()) throw new Error('Missing THEMIS_RCS_POOL_ID');
+  if (enableSms && !env.THEMIS_SMS_IDENTITY?.trim()) throw new Error('Missing THEMIS_SMS_IDENTITY');
+  const rcsIdentity = enableRcs ? env.THEMIS_RCS_POOL_ID!.trim() : '';
+  const smsIdentity = enableSms ? env.THEMIS_SMS_IDENTITY!.trim() : '';
   const deliveries = new DynamoDeliveryStore(table, d.dynamo);
   const outbound = new OutboundService({ channel: new ChannelAdapter({ mode: 'aws', rcsIdentity, smsIdentity }, d.messagingClient),
-    menus: new DynamoActiveMenuStore(table, d.dynamo), deliveries, rcsEnabled: env.ENABLE_RCS?.trim() === 'true' });
+    menus: new DynamoActiveMenuStore(table, d.dynamo), deliveries, rcsEnabled: enableRcs });
   const options: ReconcileOptions = {
     claims: new DynamoClaimReconciler(table, d.dynamo), outbound, deliveries, owner: d.owner,
     staleMs: bounded(env, 'RECONCILE_STALE_SECONDS', 300, 60, 86_400) * 1000,

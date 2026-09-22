@@ -21,8 +21,12 @@ Required Lambda environment:
 | `AGENT_RUNTIME_ARN` | Full Bedrock AgentCore Runtime ARN. |
 | `ENABLE_RCS` | Literal `true` or `false`. |
 | `ENABLE_SMS_FALLBACK` | Literal `true` or `false`; at least one channel must be enabled. |
+| `ENABLE_SES` | Literal `true` or `false`; defaults to `true` when absent. |
 | `THEMIS_RCS_TOPIC_ARN` | Required when RCS is enabled. |
 | `THEMIS_SMS_TOPIC_ARN` | Required when SMS is enabled and must differ from the RCS topic. |
+| `THEMIS_RCS_POOL_ID` | Required when RCS is enabled; not read otherwise. |
+| `THEMIS_SMS_IDENTITY` | Required when SMS fallback is enabled; not read otherwise. |
+| `THEMIS_SES_FROM` / `THEMIS_SUPPORT` | Required when SES is enabled; not read otherwise. |
 
 Optional `ACTIVE_MENU_TABLE` selects a separate table with the same
 `idempotencyKey` partition key; it defaults to `IDEMPOTENCY_TABLE`.
@@ -34,7 +38,7 @@ Optional `ACTIVE_MENU_TABLE` selects a separate table with the same
 
 `MemoryActiveMenuStore` supports local tests. `DynamoActiveMenuStore` persists one active menu per customer with its `caseId` and ordered choices. `clear(customerExternalId, caseId)` is conditional, so an old case cannot remove a newer case's menu. Numeric and textual SMS replies are interpreted only against this recovered menu. Every Dynamo `Item` or `Key` uses the `idempotencyKey` partition key; customer lookup keys are SHA-256 hashes.
 
-AWS mode requires `THEMIS_RCS_POOL_ID`, `THEMIS_SMS_IDENTITY`, `THEMIS_SES_FROM`, `THEMIS_SUPPORT`, injected clients, and a durable `IdempotencyStore`. Use an RCS+SMS pool for text fallback. The SMS identity must be a phone number/sender ID (value, ID or ARN), not a pool, because rich RCS per-message fallback disallows pools. Region/credentials are configured on the injected SDK clients. Resource creation is owned by Infra.
+AWS mode requires injected clients and a durable `IdempotencyStore`. `THEMIS_RCS_POOL_ID` is required only when `ENABLE_RCS=true`; `THEMIS_SMS_IDENTITY` only when `ENABLE_SMS_FALLBACK=true`; `THEMIS_SES_FROM`/`THEMIS_SUPPORT` only when `ENABLE_SES=true` (default). A disabled transport's identity is never required and its client/adapter is never constructed; a call that targets a disabled transport (e.g. `send_case_email` with SES off) fails explicitly instead of silently falling back to another channel. Use an RCS+SMS pool for text fallback. The SMS identity must be a phone number/sender ID (value, ID or ARN), not a pool, because rich RCS per-message fallback disallows pools. Region/credentials are configured on the injected SDK clients. Resource creation is owned by Infra.
 
 The client interfaces accept exact AWS request payloads. Bind AWS SDK v3 operations at the composition root:
 
@@ -71,7 +75,7 @@ Closes failures between claim acquisition and a durable delivery record (Lambda 
 
 Per stale claim, under a lease (`leaseOwner/leaseUntil`, every transition conditional on `PROCESSING` + owner): recorded reply → resume its send (`COMPLETED`, or `REVIEW` if the record is the ambiguity notice); no record → send the notice under the normal `reply:<id>` delivery key (put-if-absent, so a customer never gets two answers) → `REVIEW`; transient error → lease held as backoff, attempt counted; attempts > max → `QUARANTINED`. The normal path's `complete` is conditional, so a slow original attempt cannot overwrite a reconciler decision.
 
-Bounds (env, validated): `RECONCILE_STALE_SECONDS` 300 (60–86400; keep ≫ inbound Lambda timeout), `RECONCILE_LEASE_SECONDS` 240, `RECONCILE_BATCH_SIZE` 25 (≤100), `RECONCILE_MAX_ATTEMPTS` 3, `RECONCILE_BUDGET_SECONDS` 40. Also needs `IDEMPOTENCY_TABLE`, `ENABLE_RCS`, `THEMIS_RCS_POOL_ID`, `THEMIS_SMS_IDENTITY`. Logs are EMF JSON (namespace `Themis/Messaging`: Scanned, Completed, Review, Quarantined, Retry, Contended, Deferred, DurationMs) with only a 12-char claim-hash prefix, outcome and reason — no phone numbers, message ids or text.
+Bounds (env, validated): `RECONCILE_STALE_SECONDS` 300 (60–86400; keep ≫ inbound Lambda timeout), `RECONCILE_LEASE_SECONDS` 240, `RECONCILE_BATCH_SIZE` 25 (≤100), `RECONCILE_MAX_ATTEMPTS` 3, `RECONCILE_BUDGET_SECONDS` 40. Also needs `IDEMPOTENCY_TABLE`, `ENABLE_RCS`, `ENABLE_SMS_FALLBACK`, and each channel's identity only when that channel is enabled. Logs are EMF JSON (namespace `Themis/Messaging`: Scanned, Completed, Review, Quarantined, Retry, Contended, Deferred, DurationMs) with only a 12-char claim-hash prefix, outcome and reason — no phone numbers, message ids or text.
 
 ### Operator runbook for `REVIEW` / `QUARANTINED`
 ```

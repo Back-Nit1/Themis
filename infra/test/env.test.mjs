@@ -44,3 +44,39 @@ test('deployment preflight requires at least one inbound channel', () => {
   assert.throws(() => validateDeploymentPreflight(deployConfig({ enableRcs: false, enableSmsFallback: false })),
     /at least one of ENABLE_RCS or ENABLE_SMS_FALLBACK must be true/);
 });
+
+test('RCS-only deployment does not require SMS or SES identities', () => {
+  assert.doesNotThrow(() => validateDeploymentPreflight(deployConfig({
+    enableRcs: true, enableSmsFallback: false, enableSes: false,
+    smsIdentity: '', sesFromAddress: '', supportContact: '',
+  })));
+});
+
+test('SMS-only deployment does not require RCS or SES identities', () => {
+  assert.doesNotThrow(() => validateDeploymentPreflight(deployConfig({
+    enableRcs: false, enableSmsFallback: true, enableSes: false,
+    rcsPoolId: '', sesFromAddress: '', supportContact: '',
+  })));
+});
+
+test('deployment preflight requires THEMIS_RCS_POOL_ID only when RCS is enabled', () => {
+  assert.throws(() => validateDeploymentPreflight(deployConfig({ enableRcs: true, rcsPoolId: '' })),
+    /THEMIS_RCS_POOL_ID must be set/);
+  assert.doesNotThrow(() => validateDeploymentPreflight(deployConfig({ enableRcs: false, rcsPoolId: '' })));
+});
+
+test('deployment preflight requires THEMIS_SMS_IDENTITY only when SMS fallback is enabled', () => {
+  assert.throws(() => validateDeploymentPreflight(deployConfig({ enableSmsFallback: true, smsIdentity: '' })),
+    /THEMIS_SMS_IDENTITY must be set/);
+  assert.doesNotThrow(() => validateDeploymentPreflight(deployConfig({
+    enableRcs: true, enableSmsFallback: false, smsIdentity: '',
+  })));
+});
+
+test('deployment preflight skips SES identity checks when SES is disabled', () => {
+  assert.doesNotThrow(() => validateDeploymentPreflight(deployConfig({
+    enableSes: false, sesFromAddress: '', supportContact: '', sesSenderDomain: 'themis-demo.example',
+  })));
+  assert.throws(() => validateDeploymentPreflight(deployConfig({ enableSes: true, sesFromAddress: '' })),
+    /THEMIS_SES_FROM must be set/);
+});

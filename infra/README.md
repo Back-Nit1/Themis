@@ -54,10 +54,12 @@ export DEMO_AUTONOMOUS_CREDIT_LIMIT=50
 export DEMO_CREDIT_CONFIDENCE_THRESHOLD=0.8
 ```
 
-At least one inbound channel must be enabled. The deployed outbound composition
-constructs both channel adapters at cold start, so both `THEMIS_RCS_POOL_ID` and
-`THEMIS_SMS_IDENTITY` are required. The verified SES sender/domain and support
-contact are also mandatory deployment inputs. CDK does not verify that these
+At least one inbound channel must be enabled. Each identity is required, wired into
+the Lambda environment, and IAM-granted only when its capability is enabled:
+`THEMIS_RCS_POOL_ID` only if `ENABLE_RCS=true`, `THEMIS_SMS_IDENTITY` only if
+`ENABLE_SMS_FALLBACK=true`, and the verified SES sender/domain/support contact only
+if `ENABLE_SES=true` (default). A disabled transport is not deployed with a dummy
+identifier and its client is never constructed. CDK does not verify that these
 manually provisioned identities are live.
 
 ## Exact deployment order
