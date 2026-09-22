@@ -2,7 +2,7 @@
 
 ## STATUS
 
-COMPLETE — runtime composition + menu lifecycle + delivery reliability implemented; Infra wiring pending.
+COMPLETE — runtime composition + menu lifecycle + delivery reliability + capability-gated deployment implemented; Infra wiring/deploy pending.
 
 ## DONE
 
@@ -15,8 +15,6 @@ COMPLETE — runtime composition + menu lifecycle + delivery reliability impleme
 - Deterministic Case/CaseReport email renderer and SES v2 adapter.
 - Local inbound injection and captured outbound/email payloads make zero AWS calls.
 - External configuration and injected AWS clients; all tests remain AWS-free.
-- Runtime dependencies declared locally; root lockfile update handed to integration.
-- Verified compatibility with updated main 52e8419 in an isolated snapshot; no merge.
 
 ## MENUS + DELIVERY (agent/messaging/menus-reliability)
 
@@ -27,9 +25,19 @@ COMPLETE — runtime composition + menu lifecycle + delivery reliability impleme
   duplicate inbound resumes send from the record, never reruns AgentCore. RCS disabled = numbered SMS.
 - `createDeliveryEventHandler` on `THEMIS_DELIVERY_EVENT_TOPIC_ARN`; inbound topics reject delivery events and v.v.
 - `sendCaseNotification`: SES failure returns `{status:'FAILED'}`, recorded, case untouched.
-- `ClaimReconciler` (interface + memory impl) for stuck PROCESSING claims; `claimedAt` written by Dynamo claims.
-- Infra request: .handoffs/messaging/2026-09-20-delivery-events-infra.md
 - `reconcileClaims`/`createReconciler` (src/reconciler.ts): lease-protected, bounded; claim states PROCESSING→COMPLETED|REVIEW|QUARANTINED; wired in messaging-stack.ts (ThemisClaimReconciler, ClaimStateIndex).
+
+## CAPABILITY GATING (agent/messaging/capability-gated-config)
+
+- `parseRuntimeEnvironment` exposes `rcsEnabled`/`smsEnabled`/`sesEnabled`; each identity (`THEMIS_RCS_POOL_ID`,
+  `THEMIS_SMS_IDENTITY`, `THEMIS_SES_FROM`/`THEMIS_SUPPORT`) required only when its flag is enabled and only
+  when outbound sending is actually composed (a `messagingClient`/`sesClient` is injected).
+- `handleTool` fails explicitly (`Messaging transports are disabled`, `SES is disabled`) instead of silently
+  no-op'ing or falling back when a call targets a disabled transport.
+- `createReconciler` mirrors the same per-flag identity gating and the RCS-or-SMS invariant.
+- Infra (`infra/config/env.ts`, `messaging-stack.ts`): identities/env vars/IAM (`sms-voice:Send*`, `ses:SendEmail`)
+  wired only for enabled capabilities; `validateDeploymentPreflight` checks each identity only when enabled.
+- `.env.example`/READMEs updated to document per-capability requirements; no secrets added.
 
 ## CURRENT INTERFACES
 
@@ -38,7 +46,6 @@ COMPLETE — runtime composition + menu lifecycle + delivery reliability impleme
   and an injected `AgentRuntimeClient`.
 - `MemoryActiveMenuStore` and `DynamoActiveMenuStore` track ordered menus by
   customer and active case; all Dynamo keys use `idempotencyKey`.
-- createMessaging takes env, consume, store, messagingClient, sesClient.
 - Shared contracts unchanged; canonical choice intent uses InboundMessage.postback.
 - Client/resource binding details: services/messaging/README.md.
 - Wiring/dependency requests: .handoffs/messaging/2026-09-20-*.md.
@@ -51,19 +58,19 @@ COMPLETE — runtime composition + menu lifecycle + delivery reliability impleme
 - Crash between recording a reply and persisting its menu is not repaired on resume.
 - Legacy claims (no identity/claimState) are invisible to the reconciler; no alarm on QUARANTINED yet (metric only).
 - At-most-once admission does not guarantee completion across external side effects.
-- Current Infra Lambda is Python and uses one indistinguishable RCS/SMS topic;
-  it must consume the TypeScript bundle and provide distinct trusted topic ARNs.
 - Root package lock does not yet contain the two declared AWS SDK clients.
-- CodeMunch was unavailable; discovery used bounded targeted inspection.
 
 ## NEXT 3 TASKS
 
 1. Integration runs root npm install and commits the root lockfile.
-2. Infra deploys `dist/index.mjs`, distinct topic ARNs, env, permissions, and DLQ.
+2. Infra deploys `dist/index.mjs` with capability-gated env/permissions already wired here, plus DLQ.
 3. QA smoke-tests AWS incl. reconciler schedule; optional CloudWatch alarm on Quarantined>0.
 
 ## LAST TEST COMMAND + RESULT
 
 - `npm --prefix services/messaging run build` — PASS.
-- `npm --prefix services/messaging test` — PASS, 48/48 tests.
-- `git diff --check` — PASS. All AWS clients mocked.
+- `npm --prefix services/messaging test` — PASS, 68/68 tests.
+- `npm test --workspace=infra` (incl. `cdk synth`) — PASS, 53/53 tests.
+- `npm run check` (full repo build+test+python+integration+e2e) — PASS.
+- `npm run acceptance:json` — 13 PASS, 0 FAIL, 5 MANUAL (live-AWS only).
+- `git diff --check` — PASS. All AWS clients mocked; no live AWS calls made.
