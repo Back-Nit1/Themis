@@ -92,3 +92,96 @@ def test_wheel_builds_are_offline_safe(monkeypatch):
     acceptance.check_python_wheels(ROOT)
     assert len(commands) == 3
     assert all("--no-build-isolation" in command for command in commands)
+
+
+def _write_lock(root: Path, packages: dict[str, str]) -> None:
+    lock = root / "scripts" / "requirements-aws.lock.txt"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("\n".join(f"{name}=={version}" for name, version in packages.items()) + "\n", encoding="utf-8")
+
+
+def _write_runtime_entry_points(root: Path) -> Path:
+    runtime = root / "infra" / "build" / "agent-runtime"
+    for pkg in ("orchestrator", "bank_tools", "merchant_intel"):
+        (runtime / "src" / pkg).mkdir(parents=True, exist_ok=True)
+    (runtime / "src/orchestrator/main.py").write_text("", encoding="utf-8")
+    (runtime / "src/orchestrator/__init__.py").write_text("", encoding="utf-8")
+    (runtime / "src/bank_tools/__init__.py").write_text("", encoding="utf-8")
+    (runtime / "src/merchant_intel/__init__.py").write_text("", encoding="utf-8")
+    (runtime / "src/schemas.json").write_text("{}", encoding="utf-8")
+    (runtime / "customers.json").write_text("[]", encoding="utf-8")
+    (runtime / "merchant-profiles.json").write_text("{}", encoding="utf-8")
+    return runtime
+
+
+def _vendor(runtime: Path, dist_name: str, version: str, import_dir: str | None = None) -> None:
+    (runtime / (import_dir or dist_name)).mkdir(parents=True, exist_ok=True)
+    (runtime / f"{dist_name.replace('-', '_')}-{version}.dist-info").mkdir(parents=True, exist_ok=True)
+
+
+def test_aws_package_check_fails_when_lock_file_is_missing(tmp_path):
+    _write_runtime_entry_points(tmp_path)
+    result = acceptance.check_aws_package(tmp_path)
+    assert result.status == "FAIL"
+    assert "lock" in result.message.lower()
+
+
+def test_aws_package_check_reports_missing_dependency(tmp_path):
+    _write_lock(tmp_path, {"boto3": "1.43.100", "botocore": "1.43.100"})
+    runtime = _write_runtime_entry_points(tmp_path)
+    _vendor(runtime, "botocore", "1.43.100")
+    # boto3 never vendored.
+    result = acceptance.check_aws_package(tmp_path)
+    assert result.status == "FAIL"
+    assert any("boto3" in entry for entry in result.details["missing"])
+
+
+def test_aws_package_check_detects_version_drift(tmp_path):
+    _write_lock(tmp_path, {"boto3": "1.43.100"})
+    runtime = _write_runtime_entry_points(tmp_path)
+    # Stale vendor from an earlier lock version: import dir exists but the pinned
+    # dist-info does not, so a version bump without re-vendoring is caught.
+    _vendor(runtime, "boto3", "1.40.0")
+    result = acceptance.check_aws_package(tmp_path)
+    assert result.status == "FAIL"
+    assert result.details["missing"] == []
+    assert any("boto3" in entry for entry in result.details["versionDrift"])
+
+
+def test_aws_package_check_passes_for_a_fully_vendored_package(tmp_path):
+    _write_lock(tmp_path, {"boto3": "1.43.100", "python-dateutil": "2.9.0.post0"})
+    runtime = _write_runtime_entry_points(tmp_path)
+    _vendor(runtime, "boto3", "1.43.100")
+    _vendor(runtime, "python-dateutil", "2.9.0.post0", import_dir="dateutil")
+    result = acceptance.check_aws_package(tmp_path)
+    assert result.status == "PASS"
+    assert result.details == {"missing": [], "versionDrift": []}
+
+
+def test_aws_package_check_is_repeatable(tmp_path):
+    """Same inputs, same verdict every time: the check has no hidden state or side effects."""
+    _write_lock(tmp_path, {"boto3": "1.43.100"})
+    runtime = _write_runtime_entry_points(tmp_path)
+    _vendor(runtime, "boto3", "1.43.100")
+    first = acceptance.check_aws_package(tmp_path)
+    second = acceptance.check_aws_package(tmp_path)
+    assert (first.status, first.details) == (second.status, second.details)
+
+
+def test_stale_asset_leftover_from_a_prior_vendor_is_flagged_not_silently_reused(tmp_path):
+    """A left-behind older vendor (as `restage()` in build_assets.py now preserves across
+    plain builds) must still fail acceptance until it's re-vendored at the locked version."""
+    _write_lock(tmp_path, {"boto3": "1.43.100"})
+    runtime = _write_runtime_entry_points(tmp_path)
+    _vendor(runtime, "boto3", "1.30.0")  # leftover from a much older package:aws run
+    result = acceptance.check_aws_package(tmp_path)
+    assert result.status == "FAIL"
+
+
+def test_lock_import_dir_mapping_covers_every_package_in_the_real_lock_file():
+    """Guards against the acceptance-side IMPORT_DIRS map drifting from the real lock file."""
+    versions = acceptance._lock_package_versions((ROOT / "scripts/requirements-aws.lock.txt").read_text(encoding="utf-8"))
+    assert versions, "expected at least one pinned package"
+    for dist_name in versions:
+        import_dir = acceptance._LOCK_IMPORT_DIRS.get(dist_name, dist_name)
+        assert import_dir
