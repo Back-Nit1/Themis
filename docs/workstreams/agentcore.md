@@ -2,7 +2,7 @@
 
 ## STATUS
 
-WORKFLOW_HARDENING_COMPLETE (branch `agent/agentcore/workflow-hardening`; local mocks + real bank-tools path; AWS adapters unverified live)
+PAYMENT_BLOCK_TRUST_BOUNDARY_COMPLETE (branch `agent/agentcore/payment-block-trust-boundary`, off `main`; local mocks + real bank-tools path; AWS adapters unverified live)
 
 ## DONE
 
@@ -30,7 +30,6 @@ WORKFLOW_HARDENING_COMPLETE (branch `agent/agentcore/workflow-hardening`; local 
 - `update_case.outcome` and `escalate_case.summary/evidenceRefs` are sent only when `THEMIS_STRUCTURED_TOOLS=true` (Config.structured_tools, default off) because the Gateway schema lacks them; see `.handoffs/agentcore/2026-09-20-workflow-hardening-infra.md`. While off, Scenario C persists only locally (bank rejects early RESOLVED without outcome).
 - Merchant research adapter not wired (`NoResearch`); uncached merchants escalate on low confidence.
 - Scenario B ends RESOLVED with dispute + REQUEST_MERCHANT_EVIDENCE (no merchant reply handling yet). Scenario E verification = customer ledger via find_related_transactions + unreported-charge follow-up in the reply text.
-- `customerRequested` on propose_payment_block is still caller-supplied (derived from the model's requested_block); bank has no stored field to validate it against.
 - Status transition table is copied from `packages/contracts` (TS); keep in sync.
 - Reasoning-tier routing only triggers when a later turn starts with confidence < threshold.
 
@@ -41,16 +40,33 @@ WORKFLOW_HARDENING_COMPLETE (branch `agent/agentcore/workflow-hardening`; local 
 - `Reply.suggestions` [{label, postback}] at transaction confirmation and the claim question; `_reply` adds `suggestions` only when non-empty.
 - bank-tools `dispatch.OUTCOME_SPECS` = update_case + optional `outcome`, passed as `extra` until Infra adds it to SPECS.
 
+## PAYMENT-BLOCK TRUST BOUNDARY (this branch)
+
+- Fixed: `propose_payment_block`'s `customerRequested` was accepted as an authoritative model-supplied
+  boolean. A claim of `true` is now only honored when the case has fresh (`<=24h`, `CUSTOMER_REQUEST_EVIDENCE_MAX_AGE_SECONDS`)
+  `CUSTOMER_CLAIMS`/`PAYMENT_BLOCK_REQUESTED` evidence on file; a claim of `false` still passes through unchanged (never dangerous).
+- Orchestrator (`engine.py`) captures the customer's literal message the turn `requested_block` first
+  becomes true (`CaseState.block_request_message`) and persists it via `save_evidence` right before
+  calling `propose_payment_block` (`CaseState.block_request_recorded` guards against duplicates).
+- New trusted derivation: `bank_tools.policy.customer_requested_payment_block(evidence)`, enforced in
+  `dispatch._adapt_payment_block` (rejects mismatched `true` claims with `CUSTOMER_REQUEST_UNVERIFIED`);
+  Cedar text/comment and `tests/integration/test_policy_compat.py` already assumed this trusted-context
+  shape, so no Cedar text change was needed.
+- Contracts: added optional `Evidence.recordedAt` (staleness). Kept `services/merchant-intel/.../schemas.json`
+  packaged copy in sync -- remember to re-copy it whenever `packages/contracts/schemas.json` changes.
+- External tool surface unchanged (still the frozen 20+1 tools; `customerRequested` argument shape unchanged).
+
 ## NEXT 3 TASKS
 
 1. Live-verify Gateway/Memory/Bedrock adapters once infra is deployed (one cheap call each).
 2. Wire merchant-intel research adapter; add Scenario E proactive verification.
-3. Add inbound contract test against the real bank-tools store once the Gateway adapter exists.
+3. Consider an "explicit structured choice" (postback) origin for the block-request evidence, not just free-text messages.
 
 ## LAST TEST COMMAND + RESULT
 
-- `python3 -m pytest -q services/agent services/bank-tools` -> 151 passed; `tests/integration` -> 13 passed; wheels build; `git diff --check` clean
+- `python3 -m pytest -q services/agent services/bank-tools` -> 206 passed; `python3 -m pytest -q tests/integration` -> 28 passed;
+  `python3 -m pytest -q tests/e2e` -> 42 passed; `npm run check` -> PASS; `python3.12 scripts/acceptance.py --mode full` -> PASS_WITH_MANUAL_GATES (13 PASS, 0 FAIL, 5 MANUAL/live-AWS)
 
 ## LAST CODE COMMIT
 
-- See `git log -1` on `agent/agentcore/runtime`.
+- See `git log -1` on `agent/agentcore/payment-block-trust-boundary`.
