@@ -28,6 +28,9 @@ RECOGNIZED_MSG = "Glad we could sort that out. I've noted that you recognize thi
 
 DENIAL_CLAIMS = ("UNAUTHORIZED_TRANSACTION", "UNRECOGNIZED_MERCHANT", "RECURRING_PAYMENT_NOT_AUTHORIZED")
 CLAIM_KEYS = ("recognizes_merchant", "canceled", "denies_authorization", "requested_block")
+# Must match bank_tools.policy.CUSTOMER_REQUEST_EVIDENCE_TYPE: the persisted, auditable signal bank-tools
+# trusts instead of the model's requested_block claim (prompt.md trust boundary).
+CUSTOMER_REQUEST_EVIDENCE_TYPE = "PAYMENT_BLOCK_REQUESTED"
 MAX_CUSTOMER_MESSAGE_CHARS = 4_000
 IDENTITY_MISMATCH_MSG = "I can't access that conversation for this customer. Please start a new conversation or contact support."
 MESSAGE_TOO_LONG_MSG = "That message is too long for me to process safely. Please resend a shorter description of the charge."
@@ -141,7 +144,7 @@ class Orchestrator:
             return RETRY_MSG
         st.model_turns += 1
         st.bump("model_calls")
-        return self._advance(st, a)
+        return self._advance(st, a, message)
 
     def _on_tool_failure(self, st: CaseState, exc: ToolFailure) -> str:
         if st.case_id is None:
@@ -150,9 +153,11 @@ class Orchestrator:
 
     # -- state machine driver --------------------------------------------------
 
-    def _advance(self, st: CaseState, a: dict[str, Any]) -> str:
+    def _advance(self, st: CaseState, a: dict[str, Any], message: str) -> str:
         st.hints.update(a["hints"])
         st.claim.update(a["claim"])
+        if a["claim"].get("requested_block") and st.block_request_message is None:
+            st.block_request_message = message[:500]
         if st.status == "NEW":
             st.move("INTAKE")
         while True:
@@ -467,6 +472,10 @@ class Orchestrator:
                      "Merchant has not confirmed the cancellation; evidence requested.", "THEMIS_AGENT", "LOW")
         if st.claim.get("requested_block"):
             actions.append("BLOCK_RECURRING_MERCHANT")
+            if not st.block_request_recorded:   # persist before propose_payment_block; bank-tools trusts this, not the tool argument
+                self._ev(st, "CUSTOMER_CLAIMS", CUSTOMER_REQUEST_EVIDENCE_TYPE,
+                         st.block_request_message or self._claim_text(st), "CUSTOMER", "MEDIUM")
+                st.block_request_recorded = True
         if st.classification in ("UNAUTHORIZED_TRANSACTION", "UNRECOGNIZED_MERCHANT"):
             actions.append("PROVISIONAL_CREDIT")
         by_cat = lambda cat: [e["evidenceId"] for e in st.evidence if e["category"] == cat]  # noqa: E731

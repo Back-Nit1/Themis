@@ -33,7 +33,7 @@ def test_every_mutating_tool_replays_without_new_rows(w):
     case = new_case(w)
     calls = [
         ("update_case", {"caseId": case, "status": "INTAKE"}),
-        ("save_evidence", {"caseId": case, "category": "CUSTOMER_CLAIMS", "type": "CLAIM_STATEMENT", "claim": "does not recognize",
+        ("save_evidence", {"caseId": case, "category": "CUSTOMER_CLAIMS", "type": "PAYMENT_BLOCK_REQUESTED", "claim": "please block future payments",
                            "source": "CUSTOMER", "reliability": "MEDIUM", "transactionIds": ["txn_demo_0001"], "evidenceId": "ev_dup_1"}),
         ("propose_dispute_creation", {"caseId": case, "transactionIds": ["txn_demo_0001"], "hasConfirmedTransactions": True}),
         ("propose_payment_block", {"caseId": case, "customerRequested": True}),

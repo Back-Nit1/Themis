@@ -19,6 +19,7 @@ from .models import (
     Reliability,
     RiskSeverity,
     Transaction,
+    UNKNOWN_RECORDED_AT,
 )
 from .store import BankToolsStorage, BankToolsStore
 
@@ -70,6 +71,7 @@ def load_demo_store(repo_root: Path | None = None, store: BankToolsStorage | Non
         store.add_evidence(Evidence(
             evidenceId=raw["evidenceId"], caseId=raw["caseId"], category=EvidenceCategory(raw["category"]),
             type=raw["type"], claim=raw["claim"], source=raw["source"],
+            recordedAt=raw.get("recordedAt", UNKNOWN_RECORDED_AT),
             reliability=Reliability(raw["reliability"]), transactionIds=list(raw["transactionIds"]),
         ))
     return store

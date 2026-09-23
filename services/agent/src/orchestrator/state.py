@@ -37,6 +37,8 @@ class CaseState:
     confirmed_ids: list[str] = field(default_factory=list)
     claim: dict[str, Any] = field(default_factory=dict)      # recognizes_merchant/canceled/denies_authorization/requested_block
     evidence: list[dict[str, Any]] = field(default_factory=list)
+    block_request_message: str | None = None  # raw customer text that first set claim.requested_block
+    block_request_recorded: bool = False      # whether it has been persisted as bank-tools evidence yet
     classification: str | None = None
     confidence: float | None = None
     proposal: dict[str, Any] | None = None
