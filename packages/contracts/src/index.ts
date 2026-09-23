@@ -94,6 +94,9 @@ export const EvidenceTypeSchema = text;
 export const EvidenceSchema = z.strictObject({
   evidenceId: id, caseId: id, category: EvidenceCategorySchema, type: EvidenceTypeSchema,
   claim: text, source: text, reliability: z.enum(['LOW', 'MEDIUM', 'HIGH']), transactionIds: ids,
+  // When this evidence was recorded; used to reject stale customer-request evidence at the trust
+  // boundary (bank_tools.policy.customer_requested_payment_block). Optional for pre-existing rows.
+  recordedAt: timestamp.optional(),
 });
 export const ResolutionProposalSchema = z.strictObject({
   caseId: id, classification: ClaimTypeSchema, confidence,
