@@ -333,6 +333,11 @@ class Case:
         )
 
 
+# Legacy/deserialized evidence rows saved before recordedAt existed have no timestamp; treat them as
+# maximally stale (fail closed) rather than defaulting to "now" (fail open).
+UNKNOWN_RECORDED_AT = "1970-01-01T00:00:00+00:00"
+
+
 @dataclass(slots=True)
 class Evidence:
     evidenceId: str
@@ -343,12 +348,14 @@ class Evidence:
     source: str
     reliability: Reliability
     transactionIds: list[str] = field(default_factory=list)
+    recordedAt: str = field(default_factory=now_iso)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "evidenceId": self.evidenceId, "caseId": self.caseId, "category": str(self.category),
             "type": self.type, "claim": self.claim, "source": self.source,
             "reliability": str(self.reliability), "transactionIds": list(self.transactionIds),
+            "recordedAt": self.recordedAt,
         }
 
     @classmethod
@@ -356,7 +363,7 @@ class Evidence:
         return cls(
             evidenceId=d["evidenceId"], caseId=d["caseId"], category=EvidenceCategory(d["category"]),
             type=d["type"], claim=d["claim"], source=d["source"], reliability=Reliability(d["reliability"]),
-            transactionIds=list(d["transactionIds"]),
+            transactionIds=list(d["transactionIds"]), recordedAt=d.get("recordedAt") or UNKNOWN_RECORDED_AT,
         )
 
 

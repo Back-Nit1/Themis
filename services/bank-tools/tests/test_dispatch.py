@@ -130,12 +130,17 @@ def test_save_evidence_replay_adds_one_evidence(any_store):
 
 
 def test_propose_replay_keeps_one_decision_action_and_audit(any_store):
+    ok(dispatch(any_store, "save_evidence", {
+        "caseId": "case_seed", "category": "CUSTOMER_CLAIMS", "type": "PAYMENT_BLOCK_REQUESTED",
+        "claim": "please block this merchant", "source": "CUSTOMER", "reliability": "MEDIUM",
+        "idempotencyKey": "k-block-ev",
+    }))
     args = {"caseId": "case_seed", "customerRequested": True, "idempotencyKey": "k-block"}
     first = ok(dispatch(any_store, "propose_payment_block", args))
     assert first["simulated"] is True
     assert dispatch(any_store, "propose_payment_block", args) == first
-    audits = any_store.audit_for_case("case_seed")
-    assert len(audits) == 1 and audits[0].tool == "propose_payment_block"
+    audits = [a for a in any_store.audit_for_case("case_seed") if a.tool == "propose_payment_block"]
+    assert len(audits) == 1
     assert len(any_store.policy_decisions_for_case("case_seed")) == 1
 
 

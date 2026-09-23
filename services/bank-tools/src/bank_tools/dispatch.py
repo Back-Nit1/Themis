@@ -22,6 +22,7 @@ from typing import Any, Callable
 
 from . import tools
 from .errors import LeaseLostError, ToolError
+from .policy import customer_requested_payment_block
 from .store import CLAIMED, CURRENT_LEASE, IN_PROGRESS, MISMATCH, BankToolsStorage
 
 # Keep in sync with infra/config/tool-schemas.ts; tests/test_dispatch.py parses that file and fails on drift.
@@ -99,6 +100,17 @@ def _adapt_credit(store: BankToolsStorage, kw: dict[str, Any]) -> dict[str, Any]
     return {k: kw[k] for k in ("case_id", "amount", "idempotency_key")}
 
 
+def _adapt_payment_block(store: BankToolsStorage, kw: dict[str, Any]) -> dict[str, Any]:
+    # customerRequested=true is only trusted when backed by persisted evidence (see policy.py); a
+    # caller claiming false is never dangerous, so it passes through unchecked.
+    if kw["customer_requested"] and not customer_requested_payment_block(store.evidence_for_case(kw["case_id"])):
+        raise ToolError(
+            "customerRequested=true has no matching persisted customer-request evidence on this case",
+            "CUSTOMER_REQUEST_UNVERIFIED",
+        )
+    return {"case_id": kw["case_id"], "customer_requested": kw["customer_requested"], "idempotency_key": kw["idempotency_key"]}
+
+
 SPECS: dict[str, Spec] = {
     "search_transactions": Spec(tools.search_transactions, (
         _s("customerId", "customer_id"), _s("merchantId", "merchant_id", False),
@@ -129,7 +141,7 @@ SPECS: dict[str, Spec] = {
         _s("source", "source"), _s("reliability", "reliability"), _a("transactionIds", "transaction_ids"),
         _s("evidenceId", "evidence_id", False), _IDEM)),
     "propose_payment_block": Spec(tools.propose_payment_block, (
-        _s("caseId", "case_id"), _b("customerRequested", "customer_requested", True), _IDEM)),
+        _s("caseId", "case_id"), _b("customerRequested", "customer_requested", True), _IDEM), _adapt_payment_block),
     "propose_card_replacement": Spec(tools.propose_card_replacement, (_s("caseId", "case_id"), _IDEM)),
     "propose_dispute_creation": Spec(tools.propose_dispute_creation, (
         _s("caseId", "case_id"), _a("transactionIds", "transaction_ids", True),
